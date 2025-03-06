@@ -1,3 +1,8 @@
+# Purpose of fork
+
+The purpose of this fork is to include a few additions/fixes to the bootloader BLE OTA code which I've noticed around github.
+
+
 # Adafruit nRF52 Bootloader
 
 [![Build Status](https://github.com/adafruit/Adafruit_nRF52_Bootloader/workflows/Build/badge.svg)](https://github.com/adafruit/Adafruit_nRF52_Bootloader/actions)
