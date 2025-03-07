@@ -216,6 +216,7 @@ int main(void) {
     bootloader_app_start();
   }
 
+  NRF_POWER->GPREGRET = 0xA8; // No application was loaded, reset the system with the OTA DFU update
   NVIC_SystemReset();
 }
 
