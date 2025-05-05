@@ -2,7 +2,6 @@ name: Build
 
 on:
   pull_request:
-  push:
   repository_dispatch:
   release:
     types:
@@ -21,7 +20,8 @@ jobs:
         id: set-matrix
         working-directory: src/boards
         run: |
-          MATRIX_JSON=$(ls -d */ | sed 's/\/$//' | jq -R -s -c 'split("\n")[:-1]')
+          #MATRIX_JSON=$(ls -d */ | sed 's/\/$//' | jq -R -s -c 'split("\n")[:-1]')
+          MATRIX_JSON=$(ls -d promicro_nrf52840 | sed 's/\/$//' | jq -R -s -c 'split("\n")[:-1]')
           echo "matrix=$MATRIX_JSON"
           echo "matrix=$MATRIX_JSON" >> $GITHUB_OUTPUT
 
@@ -50,8 +50,10 @@ jobs:
 
     - name: Build
       run: |
-        make BOARD=${{ matrix.board }} all
-        make BOARD=${{ matrix.board }} copy-artifact
+        make BOARD=promicro_nrf52840 all
+        make BOARD=promicro_nrf52840 copy-artifact
+#        make BOARD=${{ matrix.board }} all
+#        make BOARD=${{ matrix.board }} copy-artifact
 
     - uses: actions/upload-artifact@v4
       with:
@@ -60,9 +62,8 @@ jobs:
 
     - name: Upload Release Asset
       uses: softprops/action-gh-release@v1
-      if: ${{ github.event_name == 'release' }}
       with:
         files: |
-          _bin/${{ matrix.board }}/${{ matrix.board }}_bootloader-*.zip
-          _bin/${{ matrix.board }}/${{ matrix.board }}_bootloader-*.hex
-          _bin/${{ matrix.board }}/update-${{ matrix.board }}_bootloader-*.uf2
+          _bin/promicro_nrf52840/promicro_nrf52840_bootloader-*.zip
+          _bin/promicro_nrf52840/promicro_nrf52840_bootloader-*.hex
+          _bin/promicro_nrf52840/update-promicro_nrf52840_bootloader-*.uf2
