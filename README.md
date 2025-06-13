@@ -25,7 +25,7 @@ To perform the OTA update you can use either "nRF Connect" ([Android](https://pl
 
 I use the following settings with the nRF Device Firmware Update app. Note that with the exception of "Force scanning" these are not set in stone.<br/><br/>
 
-![DFU Settings Part 1/2](docs/dfu_settings_01.png) ![DFU Settings Part 2/2](docs/dfu_settings_01.png)
+![DFU Settings Part 1/2](docs/dfu_settings_01.png) ![DFU Settings Part 2/2](docs/dfu_settings_02.png)
 
 
 Notes on settings:
