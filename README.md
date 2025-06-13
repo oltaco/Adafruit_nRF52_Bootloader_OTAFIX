@@ -1,7 +1,10 @@
 
 # Adafruit nRF52 Bootloader w/ Enhanced OTA DFU
 
-The purpose of this fork is to include a few additions/fixes to the bootloader BLE OTA code for NRF52840 based devices which I've noticed around github.
+The purpose of this fork is to change the behaviour of the bootloader in OTA DFU mode. When the bootloader *detects* an invalid application firmware after an OTA update it will boot back to OTA DFU mode. This isn't totally bulletproof but if your device is difficult to access then this is a lot better than the default behaviour which is to boot into UF2/CDC mode on detection of an invalid application firmware. 
+
+Additionally HCI_RX_BUF_QUEUE_SIZE is increased from 8 to 16. This is almost a necessity for OTA updates work on nRF52850 boards, otherwise a buffer overflow and crash in the bootloader is almost guaranteed. 
+
 
 ---
 #### Boards:
