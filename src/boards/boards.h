@@ -122,6 +122,7 @@ void board_display_init(void);
 void board_display_teardown(void);
 void board_display_draw_line(uint16_t y, uint8_t const* buf, size_t nbytes);
 void screen_draw_drag(void);
+void screen_draw_ble(void);
 #endif
 
 //--------------------------------------------------------------------+
