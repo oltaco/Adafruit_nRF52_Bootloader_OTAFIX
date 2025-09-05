@@ -32,14 +32,19 @@
  *------------------------------------------------------------------*/
 #define LEDS_NUMBER           1
 #define LED_PRIMARY_PIN       _PINNUM(1, 3) // Green
-#define LED_STATE_ON          1
+#define LED_STATE_ON          0
+
+#define LED_NEOPIXEL          _PINNUM(0, 14)
+#define NEOPIXEL_POWER_PIN    _PINNUM(0, 21)
+#define NEOPIXELS_NUMBER      2
+#define BOARD_RGB_BRIGHTNESS  0x040404
 
 /*------------------------------------------------------------------*/
 /* BUTTON
  *------------------------------------------------------------------*/
 #define BUTTONS_NUMBER        2
-#define BUTTON_1              _PINNUM(1, 10) // not connected
-#define BUTTON_2              _PINNUM(1, 10) // unusable - reset
+#define BUTTON_1              _PINNUM(1, 10)
+#define BUTTON_2              _PINNUM(1, 10)
 #define BUTTON_PULL           NRF_GPIO_PIN_PULLUP
 
 //--------------------------------------------------------------------+
