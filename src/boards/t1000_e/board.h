@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2020 Nick Winans
+ * Copyright (c) 2020 Yihui Xiong for Makerdiary
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,44 +22,46 @@
  * THE SOFTWARE.
  */
 
-#ifndef _PROMICRO_NRF52840_H
-#define _PROMICRO_NRF52840_H
+#ifndef _T1000_E_H
+#define _T1000_E_H
 
 #define _PINNUM(port, pin)    ((port)*32 + (pin))
-
-#define UICR_REGOUT0_VALUE UICR_REGOUT0_VOUT_3V3
 
 /*------------------------------------------------------------------*/
 /* LED
  *------------------------------------------------------------------*/
-#define LEDS_NUMBER       1
-#define LED_PRIMARY_PIN   _PINNUM(0, 15) // Blue
-#define LED_STATE_ON      1
+#define LEDS_NUMBER           1
+#define LED_PRIMARY_PIN       _PINNUM(0, 24)  // Green
+#define LED_STATE_ON          0
 
 /*------------------------------------------------------------------*/
 /* BUTTON
  *------------------------------------------------------------------*/
-#define BUTTONS_NUMBER    2  // changed to GPIO32, default for meshcore and meshtastic
-#define BUTTON_1          _PINNUM(1, 0)  // user button
-#define BUTTON_2          _PINNUM(1, 0)
-#define BUTTON_PULL       NRF_GPIO_PIN_PULLUP
+#define BUTTONS_NUMBER        2
+#define BUTTON_1              _PINNUM(0, 6)  // Primary Button
+#define BUTTON_2              _PINNUM(0, 18) // unusable: RESET
+#define BUTTON_PULL           NRF_GPIO_PIN_PULLUP
 
 //--------------------------------------------------------------------+
 // BLE OTA
 //--------------------------------------------------------------------+
-#define BLEDIS_MANUFACTURER  "Nologo"
-#define BLEDIS_MODEL         "ProMicro NRF52840"
+#define BLEDIS_MANUFACTURER   "Seeed Studio"
+#define BLEDIS_MODEL          "T1000-E"
 
 //--------------------------------------------------------------------+
 // USB
 //--------------------------------------------------------------------+
-#define USB_DESC_VID           0x239A
-#define USB_DESC_UF2_PID       0x00B3
-#define USB_DESC_CDC_ONLY_PID  0x00B3
+#define USB_DESC_VID            0x2886
+#define USB_DESC_UF2_PID        0x0057
+#define USB_DESC_CDC_ONLY_PID   0x0057
 
-#define UF2_PRODUCT_NAME  "ProMicro NRF52840"
-#define UF2_VOLUME_LABEL  "PROMICRO"
-#define UF2_BOARD_ID      "nRF52840-promicro"
-#define UF2_INDEX_URL     "https://www.nologo.tech/product/otherboard/NRF52840.html"
+//--------------------------------------------------------------------+
+// UF2
+//--------------------------------------------------------------------+
+#define UF2_PRODUCT_NAME        "Seeed T1000-E for Meshtastic"
+#define UF2_VOLUME_LABEL        "T1000-E"
+#define UF2_BOARD_ID            "nRF52840-T1000-E-v1"
+#define UF2_INDEX_URL           "https://www.seeedstudio.com/SenseCAP-Card-Tracker-T1000-E-for-Meshtastic-p-5913.html"
 
-#endif // _PROMICRO_NRF52840_H
+
+#endif /* _T1000_E_H */

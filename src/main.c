@@ -288,6 +288,10 @@ static void check_dfu_mode(void) {
   // Enter DFU mode accordingly to input
   if (dfu_start || !valid_app) {
     if (_ota_dfu) {
+      #ifdef DISPLAY_PIN_SCK
+        board_display_init();
+        screen_draw_ble();
+      #endif
       led_state(STATE_BLE_DISCONNECTED);
       if (!_sd_inited) mbr_init_sd();
       _sd_inited = true;

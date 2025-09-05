@@ -26,6 +26,10 @@
 
 #if defined(DISPLAY_PIN_SCK)
 
+#ifndef BANNER_TEXT
+#define BANNER_TEXT "made by oltaco / github.com/oltaco"
+#endif //BANNER_TEXT
+
 #include <string.h>
 #include <stdlib.h>
 
@@ -250,15 +254,36 @@ void screen_draw_drag(void) {
   print(version_x >= 0 ? version_x : 0, 40, COLOR_PURPLE, UF2_VERSION_BASE);
 
   // TODO the reset should be center as well
-  print(23, 110, 1, "circuitpython.org");
+  print(23, 110, 1, BANNER_TEXT);
 
 #define DRAG 70
-#define DRAGX 10
-  printicon(DRAGX + 20, DRAG + 5, COLOR_WHITE, fileLogo);
-  printicon(DRAGX + 66, DRAG, COLOR_WHITE, arrowLogo);
-  printicon(DRAGX + 108, DRAG, COLOR_WHITE, pendriveLogo);
-  print(10, DRAG - 12, COLOR_WHITE, "firmware.uf2");
-  print(90, DRAG - 12, COLOR_WHITE, UF2_VOLUME_LABEL);
+#define DRAGX 47
+  printicon(DRAGX + 0, DRAG + 5, COLOR_WHITE, fileLogo);
+  printicon(DRAGX + 65, DRAG, COLOR_WHITE, arrowLogo);
+  printicon(DRAGX + 129, DRAG, COLOR_WHITE, pendriveLogo);
+  print(22, DRAG - 12, COLOR_WHITE, "firmware.uf2");
+  print(160, DRAG - 12, COLOR_WHITE, UF2_VOLUME_LABEL);
+
+  draw_screen(frame_buf);
+}
+
+void screen_draw_ble(void) {
+  drawBar(0, 52, COLOR_GREEN);
+  drawBar(52, 55, COLOR_BLUE);
+  drawBar(107, 14, COLOR_ORANGE);
+
+  // Center UF2_PRODUCT_NAME and UF2_VERSION_BASE.
+  int name_x = (DISPLAY_WIDTH - CHAR4_KERNED_WIDTH * (int) strlen(DISPLAY_TITLE)) / 2;
+  print4(name_x >= 0 ? name_x : 0, 5, COLOR_WHITE, DISPLAY_TITLE);
+
+  int version_x = (DISPLAY_WIDTH - 6 * (int) strlen(UF2_VERSION_BASE)) / 2;
+  print(version_x >= 0 ? version_x : 0, 40, COLOR_PURPLE, UF2_VERSION_BASE);
+
+  // TODO the reset should be center as well
+  print(23, 110, 1, BANNER_TEXT);
+
+  int ble_x = (DISPLAY_WIDTH - CHAR4_KERNED_WIDTH * (int) strlen("BLE OTA")) / 2;
+  print4(ble_x >= 0 ? ble_x : 0, 65, COLOR_WHITE, "BLE OTA");
 
   draw_screen(frame_buf);
 }
