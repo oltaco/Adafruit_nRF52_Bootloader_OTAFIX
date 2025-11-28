@@ -13,29 +13,54 @@ When this bootloader *detects* an invalid application firmware after a DFU updat
 - Seeed Studio XIAO nRF52840 BLE
 - Seeed Studio XIAO nRF52840 BLE SENSE
 - RAK 4631 ([See note](#notes-on-RAK4631-bootloader))
+- RAK WisMesh Tag (new 28/11/2025)
 
 Any board already supported by the Adafruit nrf52 bootloader can be added, or if there's another nRF52840-based board you're interested in please raise an issue.
 
 ---
 #### Installation:
+**IMPORTANT:** If you are running a MeshCore companion firmware or Ripple firmware on your device **you will need to run an erase after flashing a new bootloader**. Use the MeshCore web flasher to do the erase, it will guide you to the correct erase firmware for your device. Other erase firmwares will not work, they will not erase the ExtraFS area.
+
 The recommended way to install the bootloader is using the UF2 file.
 Download the UF2 file for your board, enter UF2 mode (usually by double pressing the reset button within 0.5s) and copy the UF2 file across.
 
-If you have accidentally flashed an incorrect bootloader to your device I recommend flashing a full bootloader and SoftDevice zip package using ``adafruit-nrfutil``  
+If you have somehow managed to accidentally flash an incorrect bootloader to your device you will likely require flashing a full bootloader and SoftDevice zip package using ``adafruit-nrfutil``  
 
 
 ---
 #### Recommended settings and notes for doing OTA update:
 To perform the OTA update you can use either "nRF Connect" ([Android](https://play.google.com/store/apps/details?id=no.nordicsemi.android.mcp&hl=en&gl=US)/[iOS](https://apps.apple.com/gb/app/nrf-connect-for-mobile/id1054362403)) or "nRF Device Firmware Update" ([Android](https://play.google.com/store/apps/details?id=no.nordicsemi.android.dfu&hl=en&gl=US)/[iOS](https://apps.apple.com/sa/app/device-firmware-update/id1624454660)). My preference is the "nRF Device Firmware Update" app on Android, but I have no experience with flashing from iOS devices.
 
-I use the following settings with the nRF Device Firmware Update app. Note that with the exception of "Force scanning" these are not set in stone.<br/><br/>
+We recommend the following settings for the DFU app.<br/><br/>
 
-![DFU Settings Part 1/2](docs/dfu_settings_01.png) ![DFU Settings Part 2/2](docs/dfu_settings_02.png)
+<table>
+<tr>
+<td valign="top">
 
+**Packets Receipt Notification:** OFF  
+**Number of packets:** 8  
+**Reboot time:** 0ms  
+**Scan timeout:** 2000ms  
+**Request high MTU:** OFF  
+**Disable resume:** ON  
+**Prepare object delay:** 400ms  
+**Force Scanning:** ON  
+**Keep bond:** OFF  
+**External MCU DFU:** OFF
 
-Notes on settings:
- - Force scanning (called Scan for bootloader in Legacy DFU in nRF Connect) is required, because when initiating OTA DFU mode the device will reboot and start advertising as AdaDFU with a different MAC address, Force scanning is what allows the app to find the device after it reboots.
- - Packets receipt notification is not strictly required but in my experience it makes the update less likely to fail, at the cost of being much slower.
+</td>
+<td valign="top">
+
+Click the screenshot to view full.
+
+<a href="docs/Screenshot_20251114_142334_DFU.jpg">
+    <img src="docs/Screenshot_20251114_142334_DFU.jpg" width="200">
+</a>
+
+</td>
+</tr>
+</table>
+
 
 **IMPORTANT:** If you do an OTA update while your device is plugged into a computer the device will update but <U>it will not boot into the new application firmware</u>. It will require a manual reset in order to start. Plugged into a USB charger is fine.
 
