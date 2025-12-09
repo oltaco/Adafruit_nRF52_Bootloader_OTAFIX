@@ -36,7 +36,7 @@
 #include "sdk_common.h"
 
 
-#define BLEGAP_EVENT_LENGTH             10
+#define BLEGAP_EVENT_LENGTH             6
 #define BLEGATT_ATT_MTU_MAX             247
 enum { BLE_CONN_CFG_HIGH_BANDWIDTH = 1 };
 

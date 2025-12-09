@@ -125,8 +125,8 @@ extern void tusb_hal_nrf_power_event(uint32_t event);
 // DFU_DBL_RESET magic is used to determined which mode is entered
 #define APP_ASKS_FOR_SINGLE_TAP_RESET() (*((uint32_t*)(DFU_BANK_0_REGION_START + 0x200)) == 0x87eeb07c)
 
-// These value must be the same with one in dfu_transport_ble.c and MAX_DFU_PKT_LEN should match BLEGATT_ATT_MTU_MAX - 3
-#define BLEGAP_EVENT_LENGTH             10
+// These values must match the values in dfu_transport_ble.c and MAX_DFU_PKT_LEN should match BLEGATT_ATT_MTU_MAX - 3
+#define BLEGAP_EVENT_LENGTH             6
 #define BLEGATT_ATT_MTU_MAX             247
 enum {
   BLE_CONN_CFG_HIGH_BANDWIDTH = 1
