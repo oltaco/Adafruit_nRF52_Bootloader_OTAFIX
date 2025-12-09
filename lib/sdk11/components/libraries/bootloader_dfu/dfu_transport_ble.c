@@ -37,7 +37,7 @@
 
 
 #define BLEGAP_EVENT_LENGTH             6
-#define BLEGATT_ATT_MTU_MAX             23
+#define BLEGATT_ATT_MTU_MAX             247
 enum { BLE_CONN_CFG_HIGH_BANDWIDTH = 1 };
 
 #define DFU_REV_MAJOR                        0x00                                                    /** DFU Major revision number to be exposed. */
@@ -112,6 +112,13 @@ static uint8_t            * mp_final_packet;                                    
 
 static ble_gap_addr_t      const * m_whitelist[1];                                                  /**< List of peers in whitelist (only one) */
 static ble_gap_id_key_t    const * m_gap_ids[1];
+
+static ble_gap_data_length_params_t m_dl_params = {
+    .max_tx_octets   = 251,
+    .max_rx_octets   = 251,
+    .max_tx_time_us  = BLE_GAP_DATA_LENGTH_AUTO,
+    .max_rx_time_us  = BLE_GAP_DATA_LENGTH_AUTO
+};
 
 // Adafruit
 static uint8_t _adv_handle = BLE_GAP_ADV_SET_HANDLE_NOT_SET;
@@ -747,6 +754,11 @@ static void on_ble_evt(ble_evt_t * p_ble_evt)
         case BLE_GAP_EVT_CONNECTED:
             m_conn_handle    = p_ble_evt->evt.gap_evt.conn_handle;
             m_is_advertising = false;
+
+            // APP_ERROR_CHECK( sd_ble_gattc_exchange_mtu_request(m_conn_handle, BLEGATT_ATT_MTU_MAX) );
+
+            sd_ble_gap_data_length_update(m_conn_handle, &m_dl_params, NULL);
+
             break;
 
         case BLE_GAP_EVT_DISCONNECTED:
@@ -888,7 +900,7 @@ static void on_ble_evt(ble_evt_t * p_ble_evt)
         case BLE_GAP_EVT_DATA_LENGTH_UPDATE_REQUEST:
           // Let Softdevice decide the data length
           // ble_gap_data_length_params_t* param = &evt->evt.gap_evt.params.data_length_update_request.peer_params
-          APP_ERROR_CHECK( sd_ble_gap_data_length_update(m_conn_handle, NULL, NULL) );
+          APP_ERROR_CHECK( sd_ble_gap_data_length_update(m_conn_handle, &m_dl_params, NULL) );
         break;
 
         case BLE_GAP_EVT_PHY_UPDATE_REQUEST:
