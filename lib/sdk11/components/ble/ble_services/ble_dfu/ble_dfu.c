@@ -17,7 +17,7 @@
 #include <stddef.h>
 #include "sdk_common.h"
 
-#define MAX_DFU_PKT_LEN         20                                              /**< Maximum length (in bytes) of the DFU Packet characteristic. */
+#define MAX_DFU_PKT_LEN         (247 - 3) // MTU - 3 bytes for ATT header       /**< Maximum length (in bytes) of the DFU Packet characteristic. */
 #define PKT_START_DFU_PARAM_LEN 2                                               /**< Length (in bytes) of the parameters for Packet Start DFU Request. */
 #define PKT_INIT_DFU_PARAM_LEN  2                                               /**< Length (in bytes) of the parameters for Packet Init DFU Request. */
 #define PKT_RCPT_NOTIF_REQ_LEN  3                                               /**< Length (in bytes) of the Packet Receipt Notification Request. */
