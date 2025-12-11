@@ -235,10 +235,20 @@ static void check_dfu_mode(void) {
   bool const dfu_skip        = (gpregret == DFU_MAGIC_SKIP);
 
   bool const reason_reset_pin = (NRF_POWER->RESETREAS & POWER_RESETREAS_RESETPIN_Msk) ? true : false;
+  bool const double_reset = ((*dbl_reset_mem) == DFU_DBL_RESET_MAGIC) && reason_reset_pin;
+
 
   // start either serial, uf2 or ble
   bool dfu_start = _ota_dfu || serial_only_dfu || uf2_dfu ||
                    (((*dbl_reset_mem) == DFU_DBL_RESET_MAGIC) && reason_reset_pin);
+
+
+PRINTF("dbl_reset_mem: 0x%08lX\r\n", *dbl_reset_mem);
+PRINTF("reason_reset_pin: %d\r\n", reason_reset_pin);
+PRINTF("double_reset: %d\r\n", double_reset);
+PRINTF("dfu_start: %d\r\n", dfu_start);
+PRINTF("_ota_dfu (initial): %d\r\n", _ota_dfu);
+
 
   // Clear GPREGRET if it is our values
   if (dfu_start || dfu_skip) NRF_POWER->GPREGRET = 0;
@@ -283,6 +293,10 @@ static void check_dfu_mode(void) {
     (*dbl_reset_mem) = DFU_DBL_RESET_APP;
   } else {
     (*dbl_reset_mem) = 0;
+  }
+
+  if ((dfu_start || !valid_app) && !serial_only_dfu && !uf2_dfu && !double_reset) {
+    _ota_dfu = true; // set default to OTA only when no explicit UF2/serial/dbl-reset
   }
 
   // Enter DFU mode accordingly to input
