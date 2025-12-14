@@ -1099,7 +1099,7 @@ uint32_t dfu_transport_ble_close()
 
 #ifdef CFG_DEBUG
 
-#if 0
+// #if 0
 typedef struct
 {
   uint32_t key;
@@ -1188,12 +1188,12 @@ lookup_table_t const _strevt_table =
   .items = _strevt_lookup
 };
 
-#endif
+// #endif
 
 void print_ble_event(uint16_t evt_id)
 {
-  // const char * str = (const char *) lookup_find(&_strevt_table, evt_id);
-  const char * str = NULL;
+  const char * str = (const char *) lookup_find(&_strevt_table, evt_id);
+//   const char * str = NULL;
   PRINTF("BLE event: ");
   if ( str == NULL )
   {
