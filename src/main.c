@@ -235,6 +235,7 @@ static void check_dfu_mode(void) {
   bool const dfu_skip        = (gpregret == DFU_MAGIC_SKIP);
 
   bool const reason_reset_pin = (NRF_POWER->RESETREAS & POWER_RESETREAS_RESETPIN_Msk) ? true : false;
+  bool const double_reset = ((*dbl_reset_mem) == DFU_DBL_RESET_MAGIC) && reason_reset_pin;
 
   // start either serial, uf2 or ble
   bool dfu_start = _ota_dfu || serial_only_dfu || uf2_dfu ||
@@ -259,7 +260,7 @@ static void check_dfu_mode(void) {
   if (!just_start_app && APP_ASKS_FOR_SINGLE_TAP_RESET()) dfu_start = 1;
 
   // App mode: Double Reset detection or DFU startup for nrf52832
-  if (!(just_start_app || dfu_start || !valid_app)) {
+  if (!(just_start_app || dfu_start)) { // removed !valid_app check to allow double reset even when no app
 #ifdef NRF52832_XXAA
     /* Even DFU is not active, we still force an 1000 ms dfu serial mode when startup
      * to support auto programming from Arduino IDE
@@ -283,6 +284,10 @@ static void check_dfu_mode(void) {
     (*dbl_reset_mem) = DFU_DBL_RESET_APP;
   } else {
     (*dbl_reset_mem) = 0;
+  }
+
+  if ((dfu_start || !valid_app) && !serial_only_dfu && !uf2_dfu && !double_reset) {
+    _ota_dfu = true; // set default to OTA only when no explicit UF2/serial/dbl-reset
   }
 
   // Enter DFU mode accordingly to input
