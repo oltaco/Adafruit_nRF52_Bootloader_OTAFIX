@@ -317,6 +317,7 @@ static void check_dfu_mode(void) {
 
     if (_ota_dfu) {
       sd_softdevice_disable();
+      usb_teardown(); // allow booting to app after ota even if usb is connected
     } else {
       usb_teardown();
     }
