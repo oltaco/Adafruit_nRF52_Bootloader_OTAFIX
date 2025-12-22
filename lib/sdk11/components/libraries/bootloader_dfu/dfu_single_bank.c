@@ -65,6 +65,12 @@ static void pstorage_callback_handler(pstorage_handle_t * p_handle,
         case PSTORAGE_CLEAR_OP_CODE:
             if (m_dfu_state == DFU_STATE_PREPARING)
             {
+                // Special case for lazy erase - mark first page as erased
+                if (dfu_page_erased != NULL && dfu_image_page_count > 0)
+                {
+                    dfu_page_erased[0] = 1;
+                }
+
                 m_functions.cleared();
                 m_dfu_state = DFU_STATE_RDY;
                 if (m_data_pkt_cb != NULL)
@@ -80,39 +86,48 @@ static void pstorage_callback_handler(pstorage_handle_t * p_handle,
     APP_ERROR_CHECK(result);
 }
 
-/**@brief   Function for preparing of flash before receiving SoftDevice image.
+/**@brief   Function for preparing flash before receiving image.
  *
- * @details This function will erase current application area to ensure sufficient amount of
- *          storage for the SoftDevice image. Upon erase complete a callback will be done.
- *          See \ref dfu_bank_prepare_t for further details.
+ * @details For lazy erase mode (OTA), this sets up the tracking array and erases
+ *          only the first page to signal readiness. Subsequent pages are erased 
+ *          on-demand when stores target them.
+ *          For non-OTA mode, all pages are erased upfront.
  */
 static void dfu_prepare_func_app_erase(uint32_t image_size)
 {
-  mp_storage_handle_active = &m_storage_handle_app;
+    mp_storage_handle_active = &m_storage_handle_app;
 
-  // Doing a SoftDevice update thus current application must be cleared to ensure enough space
-  // for new SoftDevice.
-  m_dfu_state = DFU_STATE_PREPARING;
+    m_dfu_state = DFU_STATE_PREPARING;
+    dfu_base_address = m_storage_handle_app.block_id;
 
-  if ( is_ota() )
-  {
-    uint32_t err_code = pstorage_clear(&m_storage_handle_app, m_image_size);
-    APP_ERROR_CHECK(err_code);
-  }
-  else
-  {
-    uint32_t const page_count = NRFX_CEIL_DIV(m_image_size, CODE_PAGE_SIZE);
-
-    for ( uint32_t i = 0; i < page_count; i++ )
+    if ( is_ota() )
     {
-      uint32_t const addr = DFU_BANK_0_REGION_START + i * CODE_PAGE_SIZE;
-      PRINTF("Erase 0x%08lX\r\n", addr);
-      nrfx_nvmc_page_erase(addr);
-    }
+        // Setup for lazy erase
+        dfu_image_page_count = NRFX_CEIL_DIV(m_image_size, CODE_PAGE_SIZE);
 
-    // invoke complete callback
-    pstorage_callback_handler(&m_storage_handle_app, PSTORAGE_CLEAR_OP_CODE, NRF_SUCCESS, NULL, 0);
-  }
+        if (dfu_image_page_count < 1) dfu_image_page_count = 1; // This should not happen
+
+        static uint8_t dfu_page_erased_static[256];
+        dfu_page_erased = dfu_page_erased_static;
+        memset(dfu_page_erased, 0, dfu_image_page_count);
+
+        uint32_t err_code = pstorage_clear(&m_storage_handle_app, CODE_PAGE_SIZE);
+        APP_ERROR_CHECK(err_code);
+    }
+    else
+    {
+        uint32_t const page_count = NRFX_CEIL_DIV(m_image_size, CODE_PAGE_SIZE);
+
+        for ( uint32_t i = 0; i < page_count; i++ )
+        {
+            uint32_t const addr = DFU_BANK_0_REGION_START + i * CODE_PAGE_SIZE;
+            PRINTF("Erase 0x%08lX\r\n", addr);
+            nrfx_nvmc_page_erase(addr);
+        }
+
+        // invoke complete callback
+        pstorage_callback_handler(&m_storage_handle_app, PSTORAGE_CLEAR_OP_CODE, NRF_SUCCESS, NULL, 0);
+    }
 }
 
 
@@ -234,6 +249,11 @@ uint32_t dfu_init(void)
 
     m_init_packet_length = 0;
     m_image_crc          = 0;
+    
+    // Reset lazy erase state
+    dfu_page_erased = NULL;
+    dfu_image_page_count = 0;
+    dfu_base_address = 0;
 
     err_code = pstorage_register(&storage_module_param, &m_storage_handle_app);
     if (err_code != NRF_SUCCESS)
@@ -363,8 +383,8 @@ uint32_t dfu_data_pkt_handle(dfu_update_packet_t * p_packet)
             }
             else
             {
-              flash_nrf5x_write(DFU_BANK_0_REGION_START + m_data_received, p_data, data_length, false);
-              pstorage_callback_handler(mp_storage_handle_active, PSTORAGE_STORE_OP_CODE, NRF_SUCCESS, (uint8_t *) p_data, data_length);
+                flash_nrf5x_write(DFU_BANK_0_REGION_START + m_data_received, p_data, data_length, false);
+                pstorage_callback_handler(mp_storage_handle_active, PSTORAGE_STORE_OP_CODE, NRF_SUCCESS, (uint8_t *) p_data, data_length);
             }
 
             m_data_received += data_length;
@@ -378,8 +398,8 @@ uint32_t dfu_data_pkt_handle(dfu_update_packet_t * p_packet)
             {
               if ( !is_ota() ) flash_nrf5x_flush(false);
 
-              // The entire image has been received. Return NRF_SUCCESS.
-              err_code = NRF_SUCCESS;
+                // The entire image has been received. Return NRF_SUCCESS.
+                err_code = NRF_SUCCESS;
             }
             break;
 

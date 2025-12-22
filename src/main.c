@@ -125,9 +125,9 @@ extern void tusb_hal_nrf_power_event(uint32_t event);
 // DFU_DBL_RESET magic is used to determined which mode is entered
 #define APP_ASKS_FOR_SINGLE_TAP_RESET() (*((uint32_t*)(DFU_BANK_0_REGION_START + 0x200)) == 0x87eeb07c)
 
-// These value must be the same with one in dfu_transport_ble.c
+// These values must match the values in dfu_transport_ble.c and MAX_DFU_PKT_LEN should match BLEGATT_ATT_MTU_MAX - 3
 #define BLEGAP_EVENT_LENGTH             6
-#define BLEGATT_ATT_MTU_MAX             23
+#define BLEGATT_ATT_MTU_MAX             247
 enum {
   BLE_CONN_CFG_HIGH_BANDWIDTH = 1
 };
@@ -235,6 +235,7 @@ static void check_dfu_mode(void) {
   bool const dfu_skip        = (gpregret == DFU_MAGIC_SKIP);
 
   bool const reason_reset_pin = (NRF_POWER->RESETREAS & POWER_RESETREAS_RESETPIN_Msk) ? true : false;
+  bool const double_reset = ((*dbl_reset_mem) == DFU_DBL_RESET_MAGIC) && reason_reset_pin;
 
   // start either serial, uf2 or ble
   bool dfu_start = _ota_dfu || serial_only_dfu || uf2_dfu ||
@@ -259,7 +260,7 @@ static void check_dfu_mode(void) {
   if (!just_start_app && APP_ASKS_FOR_SINGLE_TAP_RESET()) dfu_start = 1;
 
   // App mode: Double Reset detection or DFU startup for nrf52832
-  if (!(just_start_app || dfu_start || !valid_app)) {
+  if (!(just_start_app || dfu_start)) { // removed !valid_app check to allow double reset even when no app
 #ifdef NRF52832_XXAA
     /* Even DFU is not active, we still force an 1000 ms dfu serial mode when startup
      * to support auto programming from Arduino IDE
@@ -283,6 +284,10 @@ static void check_dfu_mode(void) {
     (*dbl_reset_mem) = DFU_DBL_RESET_APP;
   } else {
     (*dbl_reset_mem) = 0;
+  }
+
+  if ((dfu_start || !valid_app) && !serial_only_dfu && !uf2_dfu && !double_reset) {
+    _ota_dfu = true; // set default to OTA only when no explicit UF2/serial/dbl-reset
   }
 
   // Enter DFU mode accordingly to input
@@ -312,6 +317,7 @@ static void check_dfu_mode(void) {
 
     if (_ota_dfu) {
       sd_softdevice_disable();
+      usb_teardown(); // allow booting to app after ota even if usb is connected
     } else {
       usb_teardown();
     }
@@ -370,12 +376,12 @@ static uint32_t ble_stack_init(void) {
   // Note: Interrupt state (enabled, forwarding) is not work properly if not enable ble
   sd_ble_enable(&ram_start);
 
-#if 0
+// #if 0
   ble_opt_t  opt;
   varclr(&opt);
   opt.common_opt.conn_evt_ext.enable = 1; // enable Data Length Extension
   sd_ble_opt_set(BLE_COMMON_OPT_CONN_EVT_EXT, &opt);
-#endif
+// #endif
 
   return NRF_SUCCESS;
 }

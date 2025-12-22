@@ -37,7 +37,7 @@
 
 
 #define BLEGAP_EVENT_LENGTH             6
-#define BLEGATT_ATT_MTU_MAX             23
+#define BLEGATT_ATT_MTU_MAX             247
 enum { BLE_CONN_CFG_HIGH_BANDWIDTH = 1 };
 
 #define DFU_REV_MAJOR                        0x00                                                    /** DFU Major revision number to be exposed. */
@@ -82,6 +82,16 @@ enum { BLE_CONN_CFG_HIGH_BANDWIDTH = 1 };
 #define BL_IMAGE_SIZE_OFFSET                 4                                                       /**< Offset in start packet for the size information for bootloader. */
 #define APP_IMAGE_SIZE_OFFSET                8                                                       /**< Offset in start packet for the size information for application. */
 
+// Accumulator buffer for small packets, to reduce flash write overhead
+#define ACCUMULATE_THRESHOLD      64       /**< Enable accumulator only if the first packet is <= this size */
+#define ACCUMULATE_TARGET_SIZE    240      /**< Flush when accumulator reaches this size (word-aligned) */
+
+static uint8_t  m_accum_buf[ACCUMULATE_TARGET_SIZE] __attribute__((aligned(4)));
+static uint16_t m_accum_len = 0;
+static bool     m_accum_active = false;
+static uint32_t m_accum_bytes_pending = 0;  /**< Bytes accumulated but not yet counted in m_num_of_firmware_bytes_rcvd  */
+static uint32_t m_reported_image_size = 0;  /**< Size of the incoming image being received over BLE DFU as reported by the host. */
+
 /**@brief Packet type enumeration.
  */
 typedef enum
@@ -112,6 +122,13 @@ static uint8_t            * mp_final_packet;                                    
 
 static ble_gap_addr_t      const * m_whitelist[1];                                                  /**< List of peers in whitelist (only one) */
 static ble_gap_id_key_t    const * m_gap_ids[1];
+
+static ble_gap_data_length_params_t m_dl_params = {
+    .max_tx_octets   = 251,
+    .max_rx_octets   = 251,
+    .max_tx_time_us  = BLE_GAP_DATA_LENGTH_AUTO,
+    .max_rx_time_us  = BLE_GAP_DATA_LENGTH_AUTO
+};
 
 // Adafruit
 static uint8_t _adv_handle = BLE_GAP_ADV_SET_HANDLE_NOT_SET;
@@ -326,6 +343,11 @@ static void start_data_process(ble_dfu_t * p_dfu, ble_dfu_evt_t * p_evt)
         start_packet.bl_image_size  = uint32_decode(p_length_data + BL_IMAGE_SIZE_OFFSET);
         start_packet.app_image_size = uint32_decode(p_length_data + APP_IMAGE_SIZE_OFFSET);
 
+        // Store the reported image size for use by the accumulator logic
+        m_reported_image_size = start_packet.sd_image_size +
+                                start_packet.bl_image_size +
+                                start_packet.app_image_size;
+
         err_code = dfu_start_pkt_handle(&update_packet);
         if (err_code != NRF_SUCCESS)
         {
@@ -390,6 +412,94 @@ static void init_data_process(ble_dfu_t * p_dfu, ble_dfu_evt_t * p_evt)
     }
 }
 
+/**@brief Flush the accumulator buffer to HCI pool for processing
+ */
+static void accum_flush(ble_dfu_t * p_dfu)
+{
+    if (m_accum_len == 0)
+    {
+        return;
+    }
+
+    uint32_t err_code;
+    uint32_t length = m_accum_len;
+    uint32_t original_len = m_accum_len;  // Before padding
+
+    PRINTF("OTA: Flushing accumulator buffer (%ld bytes)\r\n", length);
+
+    // Word-align the length (pad with 0xFF for flash compatibility)
+    uint32_t aligned_len = (length + 3) & ~3;
+    while (m_accum_len < aligned_len)
+    {
+        m_accum_buf[m_accum_len++] = 0xFF;
+    }
+    length = m_accum_len;
+
+    err_code = hci_mem_pool_rx_produce(length, (void **) &mp_rx_buffer);
+    if (err_code != NRF_SUCCESS)
+    {
+        PRINTF("OTA: hci_mem_pool_rx_produce failed: 0x%08lX\r\n", err_code);
+        dfu_error_notify(p_dfu, err_code);
+        m_accum_len = 0;
+        m_accum_bytes_pending = 0;
+        return;
+    }
+
+    memcpy(mp_rx_buffer, m_accum_buf, length);
+
+    err_code = hci_mem_pool_rx_data_size_set(length);
+    if (err_code != NRF_SUCCESS)
+    {
+        PRINTF("OTA: hci_mem_pool_rx_data_size_set failed: 0x%08lX\r\n", err_code);
+        dfu_error_notify(p_dfu, err_code);
+        m_accum_len = 0;
+        m_accum_bytes_pending = 0;
+        return;
+    }
+
+    err_code = hci_mem_pool_rx_extract(&mp_rx_buffer, &length);
+    if (err_code != NRF_SUCCESS)
+    {
+        PRINTF("OTA: hci_mem_pool_rx_extract failed: 0x%08lX\r\n", err_code);
+        dfu_error_notify(p_dfu, err_code);
+        m_accum_len = 0;
+        m_accum_bytes_pending = 0;
+        return;
+    }
+
+    dfu_update_packet_t dfu_pkt;
+    dfu_pkt.packet_type                      = DATA_PACKET;
+    dfu_pkt.params.data_packet.packet_length = length / sizeof(uint32_t);
+    dfu_pkt.params.data_packet.p_data_packet = (uint32_t *)mp_rx_buffer;
+
+    err_code = dfu_data_pkt_handle(&dfu_pkt);
+
+    if (err_code == NRF_SUCCESS)
+    {
+        // All firmware data received - this was the final packet
+        m_num_of_firmware_bytes_rcvd += original_len;
+        mp_final_packet = mp_rx_buffer;
+        PRINTF("OTA: Final packet flushed, total bytes: %ld\r\n", m_num_of_firmware_bytes_rcvd);
+    }
+    else if (err_code == NRF_ERROR_INVALID_LENGTH)
+    {
+        // More data expected - this is the normal case
+        m_num_of_firmware_bytes_rcvd += original_len;
+    }
+    else
+    {
+        PRINTF("OTA: dfu_data_pkt_handle failed: 0x%08lX\r\n", err_code);
+        uint32_t hci_error = hci_mem_pool_rx_consume(mp_rx_buffer);
+        if (hci_error != NRF_SUCCESS)
+        {
+            dfu_error_notify(p_dfu, hci_error);
+        }
+        dfu_error_notify(p_dfu, err_code);
+    }
+
+    m_accum_len = 0;
+    m_accum_bytes_pending = 0;
+}
 
 /**@brief     Function for processing application data written by the peer to the DFU Packet
  *            Characteristic.
@@ -400,8 +510,61 @@ static void init_data_process(ble_dfu_t * p_dfu, ble_dfu_evt_t * p_evt)
 static void app_data_process(ble_dfu_t * p_dfu, ble_dfu_evt_t * p_evt)
 {
     uint32_t err_code;
+    uint16_t pkt_len = p_evt->evt.ble_dfu_pkt_write.len;
+    uint8_t * p_data = p_evt->evt.ble_dfu_pkt_write.p_data;
 
-    if ((p_evt->evt.ble_dfu_pkt_write.len & (sizeof(uint32_t) - 1)) != 0)
+    // Check if this is the first data packet and decide whether to accumulate packets
+    if (m_num_of_firmware_bytes_rcvd == 0 && m_accum_len == 0)
+    {
+        m_accum_active = (pkt_len <= ACCUMULATE_THRESHOLD);
+        PRINTF("OTA: Packet accumulator %s (first packet size %d)\r\n", m_accum_active ? "enabled" : "disabled", pkt_len);
+    }
+
+    if (m_accum_active)
+    {
+        // Flush the accumulator if adding this packet would overflow the buffer
+        if (m_accum_len + pkt_len > ACCUMULATE_TARGET_SIZE)
+        {
+            PRINTF("OTA: Pre-overflow flush of accumulator\r\n");
+            accum_flush(p_dfu);
+        }
+
+        // Add packet to accumulator buffer
+        memcpy(m_accum_buf + m_accum_len, p_data, pkt_len);
+        m_accum_len += pkt_len;
+        m_accum_bytes_pending += pkt_len;
+
+        // Handle PRN - must be based on RECEIVED packets not flushed packets
+        // otherwise host might timeout waiting for notification
+        if (m_pkt_rcpt_notif_enabled)
+        {
+            m_pkt_notif_target_cnt--;
+
+            if (m_pkt_notif_target_cnt == 0)
+            {
+                // Need to flush before sending PRN so byte count is accurate
+                PRINTF("OTA: PRN flush of accumulator\r\n");
+                accum_flush(p_dfu);
+                
+                err_code = ble_dfu_pkts_rcpt_notify(p_dfu, m_num_of_firmware_bytes_rcvd);
+                APP_ERROR_CHECK(err_code);
+
+                m_pkt_notif_target_cnt = m_pkt_notif_target;
+            }
+        }
+
+        // Flush the accumulator if we've received the full image in order to trigger completion 
+        if ((m_num_of_firmware_bytes_rcvd + m_accum_len) == m_reported_image_size)
+        {
+            accum_flush(p_dfu);
+            return;
+        }
+
+        return;
+    }
+
+    // Original logic for large packets (no accumulation)
+    if ((pkt_len & (sizeof(uint32_t) - 1)) != 0)
     {
         // Data length is not a multiple of 4 (word size).
         err_code = ble_dfu_response_send(p_dfu,
@@ -411,7 +574,7 @@ static void app_data_process(ble_dfu_t * p_dfu, ble_dfu_evt_t * p_evt)
         return;
     }
 
-    uint32_t length = p_evt->evt.ble_dfu_pkt_write.len;
+    uint32_t length = pkt_len;
 
     err_code = hci_mem_pool_rx_produce(length, (void **) &mp_rx_buffer);
     if (err_code != NRF_SUCCESS)
@@ -420,9 +583,7 @@ static void app_data_process(ble_dfu_t * p_dfu, ble_dfu_evt_t * p_evt)
         return;
     }
 
-    uint8_t * p_data_packet = p_evt->evt.ble_dfu_pkt_write.p_data;
-
-    memcpy(mp_rx_buffer, p_data_packet, length);
+    memcpy(mp_rx_buffer, p_data, length);
 
     err_code = hci_mem_pool_rx_data_size_set(length);
     if (err_code != NRF_SUCCESS)
@@ -747,6 +908,11 @@ static void on_ble_evt(ble_evt_t * p_ble_evt)
         case BLE_GAP_EVT_CONNECTED:
             m_conn_handle    = p_ble_evt->evt.gap_evt.conn_handle;
             m_is_advertising = false;
+
+            // APP_ERROR_CHECK( sd_ble_gattc_exchange_mtu_request(m_conn_handle, BLEGATT_ATT_MTU_MAX) );
+
+            sd_ble_gap_data_length_update(m_conn_handle, &m_dl_params, NULL);
+
             break;
 
         case BLE_GAP_EVT_DISCONNECTED:
@@ -888,7 +1054,7 @@ static void on_ble_evt(ble_evt_t * p_ble_evt)
         case BLE_GAP_EVT_DATA_LENGTH_UPDATE_REQUEST:
           // Let Softdevice decide the data length
           // ble_gap_data_length_params_t* param = &evt->evt.gap_evt.params.data_length_update_request.peer_params
-          APP_ERROR_CHECK( sd_ble_gap_data_length_update(m_conn_handle, NULL, NULL) );
+          APP_ERROR_CHECK( sd_ble_gap_data_length_update(m_conn_handle, &m_dl_params, NULL) );
         break;
 
         case BLE_GAP_EVT_PHY_UPDATE_REQUEST:
@@ -1024,6 +1190,9 @@ static void sec_params_init(void)
 uint32_t dfu_transport_ble_update_start(void)
 {
     uint32_t err_code;
+
+    m_accum_len = 0;
+    m_accum_active = false;
 
     m_tear_down_in_progress = false;
     m_pkt_type              = PKT_TYPE_INVALID;
@@ -1180,7 +1349,7 @@ lookup_table_t const _strevt_table =
 
 void print_ble_event(uint16_t evt_id)
 {
-  // const char * str = (const char *) lookup_find(&_strevt_table, evt_id);
+//  const char * str = (const char *) lookup_find(&_strevt_table, evt_id);
   const char * str = NULL;
   PRINTF("BLE event: ");
   if ( str == NULL )

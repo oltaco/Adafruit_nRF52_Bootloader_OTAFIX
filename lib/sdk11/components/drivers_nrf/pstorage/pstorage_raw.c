@@ -47,6 +47,15 @@
   #error No target defined
 #endif
 
+#define PENDING_PACKET_SIZE         256     /**<  Maximum size of a single pending packet data buffer. */
+#define PENDING_PACKET_COUNT        8       /**<  Maximum number of packets that can be buffered during lazy erase. */
+
+uint8_t  * dfu_page_erased;                                           /**< Pointer to page erased status array, set by DFU layer. */
+uint32_t   dfu_image_page_count;                                      /**< Number of pages in DFU image, set by DFU layer. */
+uint32_t   dfu_base_address;                                          /**< Base address for DFU image, set by DFU layer. */
+
+static bool lazy_erase_check_and_trigger(pstorage_handle_t * p_dest, pstorage_size_t size, pstorage_size_t offset);
+static void process_pending_packets(void);
 
 /**
  * @brief Application registration information.
@@ -93,10 +102,29 @@ typedef struct
     cmd_queue_element_t  cmd[PSTORAGE_CMD_QUEUE_SIZE];    /**< Array to maintain flash access operation details */
 }cmd_queue_t;
 
-static cmd_queue_t             m_cmd_queue;                             /**< Flash operation request queue. */
-static pstorage_module_table_t m_app_table[PSTORAGE_NUM_OF_PAGES];      /**< Registered application information table. */
-static pstorage_size_t         m_next_app_instance;                     /**< Points to the application module instance that can be allocated next */
-static pstorage_size_t         m_round_val;                             /**< Round value for multiple round operations. For erase operations, the round value will contain current round counter which is identical to number of pages erased. For store operations, the round value contains current round of operation * SOC_MAX_WRITE_SIZE to ensure each store to the SoC Flash API is within the SoC limit. */
+/**@brief Structure for buffering packets during lazy page erase. */
+typedef struct
+{
+    bool                 valid;                                       /**< Whether this slot contains valid data. */
+    pstorage_handle_t    handle;                                      /**< Storage handle for destination. */
+    uint32_t             offset;                                      /**< Offset within the storage block. */
+    uint32_t             size;                                        /**< Size of data in bytes. */
+    uint8_t            * p_data_orig;                                 /**< Original data pointer for callback. */
+    uint8_t              data[PENDING_PACKET_SIZE] __attribute__((aligned(4))); /**< Buffered packet data. */
+} pending_packet_t;
+
+static cmd_queue_t             m_cmd_queue;                           /**< Flash operation request queue. */
+static pstorage_module_table_t m_app_table[PSTORAGE_NUM_OF_PAGES];    /**< Registered application information table. */
+static pstorage_size_t         m_next_app_instance;                   /**< Points to the application module instance that can be allocated next */
+static pstorage_size_t         m_round_val;                           /**< Round value for multiple round operations. For erase operations, the round value will contain current round counter which is identical to number of pages erased. For store operations, the round value contains current round of operation * SOC_MAX_WRITE_SIZE to ensure each store to the SoC Flash API is within the SoC limit. */
+
+static pending_packet_t m_pending_packets[PENDING_PACKET_COUNT];      /**< Ring buffer for pending packets. */
+static uint8_t          m_pending_read_idx;                           /**< Read index for pending packet ring buffer. */
+static uint8_t          m_pending_write_idx;                          /**< Write index for pending packet ring buffer. */
+static uint8_t          m_pending_count;                              /**< Number of pending packets in buffer. */
+static bool             m_lazy_erase_active;                          /**< True if a lazy erase is in progress. */
+static uint32_t         m_lazy_erase_page;                            /**< Page index currently being erased. */
+static bool             m_processing_pending;                         /**< True if processing a pending packet store. */
 
 /**
  * @brief Function for processing of commands and issuing flash access request to the SoftDevice.
@@ -160,6 +188,82 @@ static void cmd_queue_init(void)
     }
 }
 
+/**
+ * @brief Function for initializing the pending packets buffer.
+ */
+static void pending_packets_init(void)
+{
+    for (int i = 0; i < PENDING_PACKET_COUNT; i++)
+    {
+        m_pending_packets[i].valid = false;
+    }
+    m_pending_read_idx = 0;
+    m_pending_write_idx = 0;
+    m_pending_count = 0;
+    m_lazy_erase_active = false;
+    m_lazy_erase_page = 0;
+    m_processing_pending = false;
+}
+
+/**
+ * @brief Function for adding a packet to the pending buffer.
+ *
+ * @param[in] p_handle Pointer to the storage handle.
+ * @param[in] p_data   Pointer to the data to buffer.
+ * @param[in] size     Size of data in bytes.
+ * @param[in] offset   Offset within the storage block.
+ *
+ * @retval true  If the packet was successfully added.
+ * @retval false If the buffer is full or size exceeds maximum.
+ */
+static bool pending_packet_add(pstorage_handle_t * p_handle, uint8_t * p_data, 
+                               uint32_t size, uint32_t offset)
+{
+    if (m_pending_count >= PENDING_PACKET_COUNT || size > PENDING_PACKET_SIZE)
+    {
+        return false;
+    }
+
+    pending_packet_t * p = &m_pending_packets[m_pending_write_idx];
+    p->handle = *p_handle;
+    p->offset = offset;
+    p->size = size;
+    p->p_data_orig = p_data;
+    memcpy(p->data, p_data, size);
+    p->valid = true;
+
+    m_pending_write_idx = (m_pending_write_idx + 1) % PENDING_PACKET_COUNT;
+    m_pending_count++;
+
+    return true;
+}
+
+/**
+ * @brief Function for getting a pointer to the next pending packet without removing it.
+ *
+ * @return Pointer to the next pending packet, or NULL if buffer is empty.
+ */
+static pending_packet_t * pending_packet_peek(void)
+{
+    if (m_pending_count == 0)
+    {
+        return NULL;
+    }
+    return &m_pending_packets[m_pending_read_idx];
+}
+
+/**
+ * @brief Function for removing the next pending packet from the buffer.
+ */
+static void pending_packet_pop(void)
+{
+    if (m_pending_count > 0)
+    {
+        m_pending_packets[m_pending_read_idx].valid = false;
+        m_pending_read_idx = (m_pending_read_idx + 1) % PENDING_PACKET_COUNT;
+        m_pending_count--;
+    }
+}
 
 /**
  * @brief Function for enqueueing a flash access operation.
@@ -196,6 +300,7 @@ static uint32_t cmd_queue_enqueue(uint8_t             opcode,
         m_cmd_queue.cmd[write_index].storage_addr = (*p_storage_addr);
         m_cmd_queue.cmd[write_index].size         = size;
         m_cmd_queue.cmd[write_index].offset       = offset;
+        m_cmd_queue.count++;
         retval                                    = NRF_SUCCESS;
         if (m_cmd_queue.flash_access == false)
         {
@@ -206,7 +311,6 @@ static uint32_t cmd_queue_enqueue(uint8_t             opcode,
                 retval = NRF_SUCCESS;
             }
         }
-        m_cmd_queue.count++;
     }
     else
     {
@@ -261,15 +365,132 @@ static void app_notify(uint32_t result, cmd_queue_element_t * p_elem)
 {
     pstorage_ntf_cb_t ntf_cb;
     uint8_t           op_code = p_elem->op_code;
-    
-    ntf_cb = m_app_table[p_elem->storage_addr.module_id].cb;
 
-    // Indicate result to client.
-    ntf_cb(&p_elem->storage_addr,
-           op_code,
-           result,
-           p_elem->p_data_addr,
-           p_elem->size);
+    if (p_elem->storage_addr.module_id < PSTORAGE_NUM_OF_PAGES)
+    {
+        ntf_cb = m_app_table[p_elem->storage_addr.module_id].cb;
+        if (ntf_cb != NULL)
+        {
+            ntf_cb(&p_elem->storage_addr,
+                   op_code,
+                   result,
+                   p_elem->p_data_addr,
+                   p_elem->size);
+        }
+    }
+}
+
+/**
+ * @brief Function for notifying application of buffered store completion.
+ *
+ * @param[in] result   Result of event being notified.
+ * @param[in] p_handle Pointer to the storage handle.
+ * @param[in] p_data   Pointer to the data buffer.
+ * @param[in] size     Size of data in bytes.
+ */
+static void app_notify_buffered(uint32_t result, pstorage_handle_t * p_handle,
+                                uint8_t * p_data, uint32_t size)
+{
+    if (p_handle->module_id < PSTORAGE_NUM_OF_PAGES)
+    {
+        pstorage_ntf_cb_t ntf_cb = m_app_table[p_handle->module_id].cb;
+        if (ntf_cb != NULL)
+        {
+            ntf_cb(p_handle, PSTORAGE_STORE_OP_CODE, result, p_data, size);
+        }
+    }
+}
+
+/**
+ * @brief Function for processing packets from the pending buffer.
+ *
+ * @details Attempts to process the next pending packet. If the target page needs
+ *          erasing, triggers a lazy erase. Otherwise enqueues the store operation.
+ */
+static void process_pending_packets(void)
+{
+    if (m_processing_pending || m_lazy_erase_active || m_cmd_queue.count > 0)
+    {
+        return;
+    }
+
+    pending_packet_t * p = pending_packet_peek();
+    if (p == NULL)
+    {
+        return;
+    }
+
+    // Check if this packet needs an erase first
+    if (lazy_erase_check_and_trigger(&p->handle, p->size, p->offset))
+    {
+        // Erase triggered, don't process this packet yet
+        return;
+    }
+
+    // Page is ready, enqueue the store
+    m_processing_pending = true;
+    
+    uint32_t ret = cmd_queue_enqueue(PSTORAGE_STORE_OP_CODE, &p->handle, p->data, p->size, p->offset);
+
+    if (ret != NRF_SUCCESS)
+    {
+        m_processing_pending = false;
+        pending_packet_pop();
+    }
+}
+
+
+/**
+ * @brief Function for checking and triggering lazy erase if needed.
+ * @param[in]  p_dest Destination address where data is to be stored persistently.
+ * @param[in]  size   Size of data to be stored expressed in bytes.
+ * @param[in]  offset Offset in bytes to be applied when writing to the block.
+ * @retval     true    Lazy erase was triggered.
+ * @retval     false   No lazy erase was needed.
+ */
+static bool lazy_erase_check_and_trigger(pstorage_handle_t * p_handle, pstorage_size_t size, pstorage_size_t offset)
+{
+    uint32_t target_addr = p_handle->block_id + offset;
+    
+    if (target_addr < dfu_base_address || dfu_page_erased == NULL)
+    {
+        return false;
+    }
+    
+    uint32_t rel_addr = target_addr - dfu_base_address;
+    uint32_t page_index = rel_addr / PSTORAGE_FLASH_PAGE_SIZE;
+    
+    // Also check end of packet
+    uint32_t end_addr = target_addr + size - 1;
+    uint32_t end_rel_addr = end_addr - dfu_base_address;
+    uint32_t end_page_index = end_rel_addr / PSTORAGE_FLASH_PAGE_SIZE;
+
+    // Check if start page needs erase
+    bool start_needs_erase = (page_index < dfu_image_page_count && !dfu_page_erased[page_index]);
+    
+    // Check if end page needs erase (and is different from start page)
+    bool end_needs_erase = (end_page_index != page_index) && 
+                           (end_page_index < dfu_image_page_count && !dfu_page_erased[end_page_index]);
+
+    if (!start_needs_erase && !end_needs_erase)
+    {
+        return false;
+    }
+    
+    // Determine which page to erase (start page takes priority)
+    uint32_t erase_page = start_needs_erase ? page_index : end_page_index;
+    
+    m_lazy_erase_active = true;
+    m_lazy_erase_page = erase_page;
+
+    pstorage_handle_t erase_handle;
+    erase_handle.block_id = dfu_base_address + (erase_page * PSTORAGE_FLASH_PAGE_SIZE);
+    erase_handle.module_id = p_handle->module_id;
+
+    cmd_queue_enqueue(PSTORAGE_CLEAR_OP_CODE, &erase_handle, NULL,
+                     PSTORAGE_FLASH_PAGE_SIZE, 0);
+    
+    return true;
 }
 
 
@@ -279,7 +500,7 @@ static void app_notify(uint32_t result, cmd_queue_element_t * p_elem)
  * @param[in] sys_evt System event received.
  */
 void pstorage_sys_event_handler(uint32_t sys_evt)
-{
+{  
     uint32_t retval = NRF_SUCCESS;
 
     // The event shall only be processed if requested by this module.
@@ -293,13 +514,19 @@ void pstorage_sys_event_handler(uint32_t sys_evt)
             {
                 p_cmd = &m_cmd_queue.cmd[m_cmd_queue.rp];
                 m_round_val++;
-            
+
                 bool command_finished = ((m_round_val * SOC_MAX_WRITE_SIZE) >= p_cmd->size);
+
+                if (p_cmd->op_code == PSTORAGE_CLEAR_OP_CODE)
+                {
+                    command_finished = true;
+                }
 
                 if (command_finished)
                 {
                     uint8_t queue_rp = m_cmd_queue.rp;
-                    
+                    uint8_t completed_op = p_cmd->op_code;
+
                     m_round_val = 0;
                     m_cmd_queue.count--;
                     m_cmd_queue.rp++;
@@ -309,24 +536,78 @@ void pstorage_sys_event_handler(uint32_t sys_evt)
                         m_cmd_queue.rp -= PSTORAGE_CMD_QUEUE_SIZE;
                     }
 
-                    app_notify(retval, &m_cmd_queue.cmd[queue_rp]);
+                    if (m_lazy_erase_active && completed_op == PSTORAGE_CLEAR_OP_CODE)
+                    {
+                        // Lazy erase completed
+                        if (dfu_page_erased != NULL && m_lazy_erase_page < dfu_image_page_count)
+                        {
+                            dfu_page_erased[m_lazy_erase_page] = 1;
+                        }
 
-                    // Initialize/free the element as it is now processed.
-                    cmd_queue_element_init(queue_rp);
+                        m_lazy_erase_active = false;
+                        cmd_queue_element_init(queue_rp);
+
+                        process_pending_packets();
+                    }
+                    else if (m_processing_pending && completed_op == PSTORAGE_STORE_OP_CODE)
+                    {
+                        // Store from pending buffer completed
+                        pending_packet_t * p = pending_packet_peek();
+                        if (p != NULL)
+                        {
+                            pstorage_handle_t cb_handle = p->handle;
+                            uint8_t* cb_data = p->p_data_orig;
+                            uint32_t cb_size = p->size;
+
+                            pending_packet_pop();
+
+                            cmd_queue_element_init(queue_rp);
+                            
+                            // Clear flag BEFORE callback
+                            m_processing_pending = false;
+
+                            // Notify application that buffered this buffered store is done
+                            app_notify_buffered(retval, &cb_handle, cb_data, cb_size);
+                        }
+                        else
+                        {
+                            m_processing_pending = false;
+                            cmd_queue_element_init(queue_rp);
+                        }
+                    }
+                    else
+                    {
+                        app_notify(retval, &m_cmd_queue.cmd[queue_rp]);
+
+                        // Initialize/free the element as it is now processed.
+                        cmd_queue_element_init(queue_rp);
+                    }
                 }
-                // Schedule any queued flash access operations.
-                retval = cmd_queue_dequeue();
+
+                // Process next queued command OR next pending packet
+                if (m_cmd_queue.count > 0)
+                {
+                    retval = cmd_queue_dequeue();
+                }
+                else if (m_pending_count > 0 && !m_processing_pending && !m_lazy_erase_active)
+                {
+                    // Queue is empty but we have pending packets - process one
+                    process_pending_packets();
+                }
+                
                 if (retval != NRF_SUCCESS)
                 {
                     app_notify(retval, &m_cmd_queue.cmd[m_cmd_queue.rp]);
                 }
             }
             break;
-                
+
             case NRF_EVT_FLASH_OPERATION_ERROR:
+                m_lazy_erase_active = false;
+                m_processing_pending = false;
                 app_notify(NRF_ERROR_TIMEOUT, &m_cmd_queue.cmd[m_cmd_queue.rp]);
                 break;
-            
+
             default:
                 // No implementation needed.
                 break;
@@ -347,6 +628,11 @@ static uint32_t cmd_process(void)
     cmd_queue_element_t * p_cmd;
 
     retval = NRF_ERROR_FORBIDDEN;
+
+    if (m_cmd_queue.count == 0)
+    {
+        return NRF_SUCCESS;
+    }
 
     p_cmd = &m_cmd_queue.cmd[m_cmd_queue.rp];
 
@@ -379,7 +665,7 @@ static uint32_t cmd_process(void)
             }
         }
         break;
-        
+
         case PSTORAGE_CLEAR_OP_CODE:
         {
             uint32_t page_number;
@@ -390,12 +676,12 @@ static uint32_t cmd_process(void)
             retval = sd_flash_page_erase(page_number);
         }
         break;
-    
+
         default:
             // Should never reach here.
             break;
     }
-    
+
     if (retval == NRF_SUCCESS)
     {
        m_cmd_queue.flash_access = true;
@@ -409,7 +695,8 @@ static uint32_t cmd_process(void)
 uint32_t pstorage_init(void)
 {
     cmd_queue_init();
-    
+    pending_packets_init();
+
     m_next_app_instance = 0;
     m_round_val         = 0;
 
@@ -451,11 +738,22 @@ uint32_t pstorage_store(pstorage_handle_t * p_dest,
                         pstorage_size_t     offset)
 {
     // Verify word alignment.
-    if ((!is_word_aligned(p_src)) || (!is_word_aligned(p_src+offset)))
+    if ((!is_word_aligned(p_src)) || (!is_word_aligned((void *)(p_dest->block_id + offset))))
     {
         return NRF_ERROR_INVALID_ADDR;
     }
 
+    if (m_lazy_erase_active || lazy_erase_check_and_trigger(p_dest, size, offset))
+    {
+        // Buffer this packet - erase in progress or just triggered
+        if (!pending_packet_add(p_dest, p_src, size, offset))
+        {
+            return NRF_ERROR_NO_MEM;
+        }
+        return NRF_SUCCESS;
+    }
+
+    // Page already erased, proceed with store
     return cmd_queue_enqueue(PSTORAGE_STORE_OP_CODE, p_dest, p_src, size, offset);
 }
 

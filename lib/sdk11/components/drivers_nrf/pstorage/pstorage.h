@@ -27,6 +27,10 @@
 
 #include "pstorage_platform.h"
 
+extern uint8_t* dfu_page_erased;
+extern uint32_t dfu_image_page_count;
+extern int32_t  dfu_pending_erase_page;
+extern uint32_t dfu_base_address;
 
 /**@defgroup ps_opcode Persistent Storage Access Operation Codes
  * @{
