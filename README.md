@@ -1,6 +1,6 @@
 # Adafruit nRF52 Bootloader with Enhanced OTA DFU
 
-## Changes in OTAFIX 2.0
+## Changes in OTAFIX 2.1
 
 - **Defaults to OTA DFU mode**  
   When no valid application is present, the bootloader defaults to OTA DFU mode.  
