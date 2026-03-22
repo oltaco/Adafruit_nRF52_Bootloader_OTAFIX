@@ -336,9 +336,13 @@ endif
 CFLAGS += -DDFU_APP_DATA_RESERVED=$(DFU_APP_DATA_RESERVED)
 
 # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=105523
-# Fixes for gcc version 12, 13 and 14.
-ifneq (,$(filter 12.% 13.% 14.%,$(shell $(CC) -dumpversion 2>/dev/null)))
+# Fixes for gcc version 12, 13, 14 and 15.
+ifneq (,$(filter 12.% 13.% 14.% 15.%,$(shell $(CC) -dumpversion 2>/dev/null)))
 	CFLAGS += --param=min-pagesize=0
+	# Suppress false-positive -Warray-bounds on memory-mapped address dereferences in SDK headers
+	CFLAGS += -Wno-array-bounds
+	# Suppress false-positive -Wunterminated-string-initialization on intentional FAT 8.3 name fields
+	CFLAGS += -Wno-unterminated-string-initialization
 endif
 
 #------------------------------------------------------------------------------
