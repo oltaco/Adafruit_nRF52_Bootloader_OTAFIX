@@ -317,7 +317,8 @@ static void check_dfu_mode(void) {
 
     if (_ota_dfu) {
       sd_softdevice_disable();
-      usb_teardown(); // allow booting to app after ota even if usb is connected
+      usb_teardown();
+      NVIC_SystemReset(); // clean reset after BLE OTA; GPREGRET is already 0, boots straight to app
     } else {
       usb_teardown();
     }

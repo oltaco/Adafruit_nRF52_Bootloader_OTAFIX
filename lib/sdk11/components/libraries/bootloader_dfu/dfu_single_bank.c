@@ -497,7 +497,7 @@ uint32_t dfu_image_validate()
             {
                 m_dfu_state = DFU_STATE_VALIDATE;
 
-                err_code = dfu_init_postvalidate((uint8_t *)mp_storage_handle_active->block_id, m_image_size);
+                err_code = dfu_init_postvalidate((uint8_t *)mp_storage_handle_active->block_id, m_image_size, &m_image_crc);
                 VERIFY_SUCCESS(err_code);
                 m_dfu_state = DFU_STATE_WAIT_4_ACTIVATE;
             }
