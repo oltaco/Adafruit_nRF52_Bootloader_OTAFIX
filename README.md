@@ -29,6 +29,7 @@
   - **RAK 4631** → `4631_DFU`
   - **RAK WisMesh Tag** → `RTAG_DFU`
   - **XIAO NRF52 BLE / SENSE** → `XIAO_DFU`
+  - **LILIGO T-ECHO** → `TECH_DFU`
 
 ---
 
@@ -42,6 +43,7 @@
 - Seeed Studio XIAO nRF52840 BLE SENSE
 - RAK 4631 ([See note](#notes-on-RAK4631-bootloader))
 - RAK WisMesh Tag (new 28/11/2025)
+- Liligo T-Echo (new 10/04/2026)
 
 Any board already supported by the Adafruit nRF52 bootloader can be added.  
 If there is another nRF52840-based board you are interested in, please raise an issue.
