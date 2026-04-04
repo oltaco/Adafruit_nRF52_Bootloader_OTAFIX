@@ -30,8 +30,9 @@
 /*------------------------------------------------------------------*/
 /* LED
  *------------------------------------------------------------------*/
-#define LEDS_NUMBER           1
-#define LED_PRIMARY_PIN       _PINNUM(1, 1)
+#define LEDS_NUMBER           2
+#define LED_PRIMARY_PIN       _PINNUM(0, 14)
+#define LED_SECONDARY_PIN     _PINNUM(0, 13)
 #define LED_STATE_ON          1
 
 #define NEOPIXELS_NUMBER      0
@@ -40,27 +41,27 @@
 /* BUTTON
  *------------------------------------------------------------------*/
 #define BUTTONS_NUMBER        2
-#define BUTTON_1              _PINNUM(0, 8) // user button
-#define BUTTON_2              _PINNUM(0, 8)
+#define BUTTON_1              _PINNUM(1, 9) // user button 42
+#define BUTTON_2              _PINNUM(0, 11) // 11
 #define BUTTON_PULL           NRF_GPIO_PIN_PULLUP
 
 //--------------------------------------------------------------------+
 // BLE OTA
 //--------------------------------------------------------------------+
-#define BLEDIS_MANUFACTURER   "Seeed"
-#define BLEDIS_MODEL          "Wio Tracker L1"
+#define BLEDIS_MANUFACTURER   "Liligo"
+#define BLEDIS_MODEL          "T-Echo"
 
 //--------------------------------------------------------------------+
 // USB
 //--------------------------------------------------------------------+
-#define USB_DESC_VID           0x2886
-#define USB_DESC_UF2_PID       0x1667
-#define USB_DESC_CDC_ONLY_PID  0x1667
+#define USB_DESC_VID           0x239A
+#define USB_DESC_UF2_PID       0x0029
+#define USB_DESC_CDC_ONLY_PID  0x0029
 
 //------------- UF2 -------------//
-#define UF2_PRODUCT_NAME   "Seeed TRACKER L1"
-#define UF2_VOLUME_LABEL   "TRACKER L1"
-#define UF2_BOARD_ID       "TRACKER L1"
-#define UF2_INDEX_URL      "https://www.seeedstudio.com/"
+#define UF2_PRODUCT_NAME   "Liligo T-Echo"
+#define UF2_VOLUME_LABEL   "T-Echo"
+#define UF2_BOARD_ID       "T-Echo"
+#define UF2_INDEX_URL      "https://liligo.cc/"
 
-#endif // _TRACKER_L1
+#endif // _TECHO
