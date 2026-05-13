@@ -515,3 +515,9 @@ gdbflash: $(BUILD)/$(MERGED_FILE).hex
 
 gdb: $(BUILD)/$(OUT_NAME).out
 	$(GDB_BMP) $<
+
+# GCC 15.x compatibility: scope strictness exceptions to specific files
+# bootloader_settings.c:45 - reads hardcoded memory address, valid for bootloaders
+# ghostfat.c:137 - FAT 8.3 filenames are intentionally non-null-terminated
+$(BUILD)/bootloader_settings.o: CFLAGS += -Wno-array-bounds
+$(BUILD)/ghostfat.o: CFLAGS += -Wno-unterminated-string-initialization
