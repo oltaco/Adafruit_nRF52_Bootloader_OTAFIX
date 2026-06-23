@@ -242,6 +242,25 @@ static void drawBar(int y, int h, int color) {
 
 // draw drag & drop screen
 void screen_draw_drag(void) {
+#ifdef DISPLAY_CONTROLLER_ST7735
+  drawBar(0, 35, COLOR_GREEN);
+  drawBar(35, 35, COLOR_BLUE);
+  drawBar(70, 10, COLOR_ORANGE);
+
+  int name_x = (DISPLAY_WIDTH - CHAR4_KERNED_WIDTH * (int) strlen(DISPLAY_TITLE)) / 2;
+  print4(name_x >= 0 ? name_x : 0, 0, COLOR_WHITE, DISPLAY_TITLE);
+
+  int ban_x = (DISPLAY_WIDTH - 6 * (int) strlen(BANNER_TEXT)) / 2;
+  print(ban_x >= 0 ? ban_x : 0, 70, COLOR_WHITE, BANNER_TEXT);
+
+#define DRAG 45
+#define DRAGX 10
+  printicon(DRAGX + 20, DRAG, COLOR_WHITE, fileLogo);
+  printicon(DRAGX + 65, DRAG - 5, COLOR_WHITE, arrowLogo);
+  printicon(DRAGX + 108, DRAG - 9, COLOR_WHITE, pendriveLogo);
+  print(DRAGX - 5, DRAG - 10, COLOR_WHITE, "firmware.uf2");
+#endif
+#ifdef DISPLAY_CONTROLLER_ST7789
   drawBar(0, 52, COLOR_GREEN);
   drawBar(52, 55, COLOR_BLUE);
   drawBar(107, 14, COLOR_ORANGE);
@@ -263,11 +282,28 @@ void screen_draw_drag(void) {
   printicon(DRAGX + 129, DRAG, COLOR_WHITE, pendriveLogo);
   print(22, DRAG - 12, COLOR_WHITE, "firmware.uf2");
   print(160, DRAG - 12, COLOR_WHITE, UF2_VOLUME_LABEL);
+#endif
 
   draw_screen(frame_buf);
 }
 
 void screen_draw_ble(void) {
+#ifdef DISPLAY_CONTROLLER_ST7735
+  drawBar(0, 35, COLOR_GREEN);
+  drawBar(35, 35, COLOR_BLUE);
+  drawBar(70, 10, COLOR_ORANGE);
+
+  int name_x = (DISPLAY_WIDTH - CHAR4_KERNED_WIDTH * (int) strlen(DISPLAY_TITLE)) / 2;
+  print4(name_x >= 0 ? name_x : 0, 0, COLOR_WHITE, DISPLAY_TITLE);
+
+  int ble_x = (DISPLAY_WIDTH - CHAR4_KERNED_WIDTH * (int) strlen("BLE OTA")) / 2;
+  print4(ble_x >= 0 ? ble_x : 0, 36, COLOR_WHITE, "BLE OTA");
+
+  int ban_x = (DISPLAY_WIDTH - 6 * (int) strlen(BANNER_TEXT)) / 2;
+  print(ban_x >= 0 ? ban_x : 0, 70, COLOR_WHITE, BANNER_TEXT);
+
+#endif
+#ifdef DISPLAY_CONTROLLER_ST7789
   drawBar(0, 52, COLOR_GREEN);
   drawBar(52, 55, COLOR_BLUE);
   drawBar(107, 14, COLOR_ORANGE);
@@ -284,6 +320,7 @@ void screen_draw_ble(void) {
 
   int ble_x = (DISPLAY_WIDTH - CHAR4_KERNED_WIDTH * (int) strlen("BLE OTA")) / 2;
   print4(ble_x >= 0 ? ble_x : 0, 65, COLOR_WHITE, "BLE OTA");
+#endif
 
   draw_screen(frame_buf);
 }

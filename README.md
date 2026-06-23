@@ -9,7 +9,8 @@
   Elecrow ThinkNode M1, M3, M6  
   LilyGo T-Echo  
   Minewsemi MX25LE01  
-  Seeed SenseCAP Solar Node P1
+  Seeed SenseCAP Solar Node P1  
+  Heltec T096
 
 ## Changes in OTAFIX 2.1
 
