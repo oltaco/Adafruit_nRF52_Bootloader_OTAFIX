@@ -67,6 +67,8 @@
 #include "pstorage.h"
 #include "nrfx_nvmc.h"
 
+#include "ota_delta.h"   // MeshCore .mota delta-apply (single-slot, in-place)
+
 #ifdef NRF_USBD
 
 #include "uf2/uf2.h"
@@ -191,6 +193,13 @@ int main(void) {
 
   // Reset peripherals
   board_teardown();
+
+  // MeshCore OTA: if a verified+approved .mota was staged for this firmware, apply it in place now
+  // (SoftDevice is off here; safe to rewrite the single app slot). On success, reset to boot the new
+  // image; on any failure the app region is left for the validity check below to route to DFU.
+  if ( ota_delta_check_and_apply() ) {
+    NVIC_SystemReset();
+  }
 
   /* Jump to application if valid
    * "Master Boot Record and SoftDevice initializaton procedure"

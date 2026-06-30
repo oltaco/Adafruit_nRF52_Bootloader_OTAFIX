@@ -11,9 +11,33 @@ MEMORY
    *  those values do not match. The check is performed in main.c, see
    *  APP_ERROR_CHECK_BOOL(*((uint32_t *)NRF_UICR_BOOT_START_ADDRESS) == BOOTLOADER_REGION_START);
    */
-  FLASH (rx) : ORIGIN = 0xF4000, LENGTH = 0xFE000-0xF4000 - 2K /* 38 KB */
+  /* MeshCore OTA: the in-place delta applier (detools CRLE in-place + sha256 + ota_delta) needs ~6 KB,
+     and detools is already at its minimum here (only the CRLE+in-place paths survive --gc-sections; the
+     code was slimmed as far as is safe). That pushes the bootloader ~0.2 KB past the stock 38 KB code
+     region, so we reclaim 1 KB from the CF2 bootloaderConfig page and give it to FLASH -> 39 KB. That
+     reclaim is safe: bootloaderConfig (boards/<board>/pinconfig.c) is a compile-time `const` array --
+     read-only flash, NEVER written at runtime, so it cannot grow in the field. It is referenced by
+     symbol in uf2/ghostfat.c (NOT a fixed address), currently ~88 B, and its CF2 format caps at 100
+     entries (~816 B < 1 KB); a build that overran the 1 KB would fail at LINK time, not at runtime. This
+     is migration-safe: the bootloader still starts at 0xF4000 (UICR/BOOTLOADER_REGION_START unchanged) and
+     the MBR-params (0xFE000) and bootloader-settings (0xFF000) pages are untouched.
 
-  BOOTLOADER_CONFIG (r): ORIGIN = 0xFE000 - 2K, LENGTH = 2K
+     Full nRF52840 (RAK4631) flash map — only the FLASH/CF2 boundary (*) moves vs stock:
+
+         0x00000  MBR
+         0x01000  SoftDevice (S140 6.1.1)
+         0x26000  Application  (MeshCore; staged .mota lives just below the filesystem, < 0xD4000)
+         ...
+         0xF4000  ┌─ bootloader code (FLASH) ── 39 KB ──┐   stock: 38 KB, ends 0xFD800
+         0xFDC00  ├─ CF2 bootloaderConfig ───── 1 KB ───┤ (*) stock: 2 KB, starts 0xFD800
+         0xFE000  ├─ MBR params ─────────────── 4 KB ───┤   unchanged
+         0xFF000  ├─ bootloader settings ────── 4 KB ───┤   unchanged
+        0x100000  └─ (end of flash) ────────────────────┘
+  */
+     
+  FLASH (rx) : ORIGIN = 0xF4000, LENGTH = 0xFE000-0xF4000 - 1K /* 39 KB */
+
+  BOOTLOADER_CONFIG (r): ORIGIN = 0xFE000 - 1K, LENGTH = 1K
 
   /** Location of mbr params page in flash. */
   MBR_PARAMS_PAGE (rw) : ORIGIN = 0xFE000, LENGTH = 0x1000
