@@ -1,5 +1,12 @@
 # Adafruit nRF52 Bootloader with Enhanced OTA DFU
 
+## Changes in OTAFIX 2.3
+
+- **In-place OTA delta apply**  
+  Adds on-device application of compact firmware *delta* updates (MeshCore `.mota` containers), letting a device with no A/B slot update over a low-bandwidth link without transferring a full image.  
+  After the running application stages a verified, approved `.mota` in free flash and reboots with the apply trigger set, the bootloader locates it, re-checks that the delta was built against the exact running firmware (the `.mota` `base_hash` vs the `EndF` trailer of the current app), applies the patch in place with the bundled [detools](https://github.com/eerimoq/detools) decoder, and verifies the result against the manifest `image_hash` before marking the new image valid.  
+  The trigger is a dedicated `GPREGRET` magic set only on approval, so normal boots never scan or apply. Any failure (no trigger, base mismatch, bad patch, post-apply hash mismatch) leaves the bank invalid and falls through to OTA DFU — an interrupted apply can never boot a corrupt image.
+
 ## Changes in OTAFIX 2.2
 
 - **Use maximum TX power for BLE**  
