@@ -1,0 +1,9 @@
+_build
+_bin
+.git/modules
+**/.git
+**/__pycache__
+*.o
+*.out
+*.map
+.DS_Store
