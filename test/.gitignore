@@ -1,0 +1,5 @@
+# compiled host test harnesses (built by `make`); the .c sources + vectors are committed
+apply_sim
+apply_sim_lto
+readback_test
+*.o

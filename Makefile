@@ -41,6 +41,12 @@ else
 endif
 
 GIT_VERSION := $(shell git describe --dirty --always --tags)
+# This OTAFIX fork is released as tags of the form 0.9.2-OTAFIX<major>.<minor>. An untagged
+# build makes `git describe` fall back to a bare commit hash, which the MK_BOOTLOADER_VERSION
+# parser below cannot split into major.minor.patch — substitute the release string instead.
+ifeq (,$(findstring OTAFIX,$(GIT_VERSION)))
+GIT_VERSION := 0.9.2-OTAFIX2.3
+endif
 GIT_SUBMODULE_VERSIONS := $(shell git submodule status | cut -d" " -f3,4 | paste -s -d" " -)
 
 # compiled file name
@@ -135,6 +141,9 @@ C_SRC += \
   src/main.c \
   src/screen.c \
   src/images.c \
+  src/ota_delta.c \
+  src/sha256.c \
+  src/detools/detools.c \
 
 # all files in boards
 C_SRC += src/boards/boards.c
@@ -257,6 +266,12 @@ IPATH += \
 #------------------------------------------------------------------------------
 
 #flags common to all targets
+# -flto: the MeshCore OTA in-place applier (detools + sha256 + ota_delta, ~6 KB) pushes the bootloader
+# to the edge of the 39 KB region; display-UI boards (screen.c + images.c, e.g. heltec_t114) OVERFLOW
+# without it. LTO recovers ~3-4 KB image-wide so OTA fits on every nRF52840 board (t114 ~95%, others
+# ~88%). HW-validated on RAK4631: the LTO bootloader builds, boots, runs serial DFU, AND applies an
+# in-place delta. NOTE: LTO REQUIRES ota_delta.c's volatile fl_read (the in-place readback aliases the
+# nrfx flash write through a cast pointer; without volatile, LTO caches a stale read -> apply refused).
 CFLAGS += \
 	-mthumb \
 	-mabi=aapcs \
@@ -265,6 +280,7 @@ CFLAGS += \
 	-mfpu=fpv4-sp-d16 \
 	-ggdb \
 	-Os \
+	-flto \
 	-ffunction-sections \
 	-fdata-sections \
 	-fno-builtin \
@@ -284,6 +300,10 @@ CFLAGS += \
 	-Wmissing-format-attribute \
 	-Wno-endif-labels \
 	-Wunreachable-code
+
+# MeshCore OTA: the bootloader only ever applies CRLE-compressed in-place .mota deltas, so drop the
+# detools uncompressed-patch reader (saves flash in the size-constrained bootloader region).
+CFLAGS += -DDETOOLS_CONFIG_COMPRESSION_NONE=0
 
 # Suppress warning caused by SDK
 CFLAGS += -Wno-unused-parameter -Wno-expansion-to-defined

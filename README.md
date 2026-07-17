@@ -1,5 +1,12 @@
 # Adafruit nRF52 Bootloader with Enhanced OTA DFU
 
+## Changes in OTAFIX 2.3
+
+- **In-place OTA delta apply**  
+  Adds on-device application of compact firmware *delta* updates (MeshCore `.mota` containers), letting a device with no A/B slot update over a low-bandwidth link without transferring a full image.  
+  After the running application stages a verified, approved `.mota` in free flash and reboots with the apply trigger set, the bootloader locates it, re-checks that the delta was built against the exact running firmware (the `.mota` `base_hash` vs the `EndF` trailer of the current app), applies the patch in place with the bundled [detools](https://github.com/eerimoq/detools) decoder, and verifies the result against the manifest `image_hash` before marking the new image valid.  
+  The trigger is a dedicated `GPREGRET` magic set only on approval, so normal boots never scan or apply. Any failure (no trigger, base mismatch, bad patch, post-apply hash mismatch) leaves the bank invalid and falls through to OTA DFU — an interrupted apply can never boot a corrupt image.
+
 ## Changes in OTAFIX 2.2
 
 - **Use maximum TX power for BLE**  
@@ -69,12 +76,25 @@ If there is another nRF52840-based board you would like to see supported please 
 
 ---
 
+## Building from source (Docker)
+
+Recommended on macOS/Linux — avoids installing a local ARM GCC toolchain:
+
+```sh
+git submodule update --init --recursive
+docker build -t vk-otafix-build .
+docker run --rm -v "$PWD":/src -w /src vk-otafix-build make BOARD=wismesh_tag all
+```
+
+UF2 output: `_build/build-<board>/update-<board>_bootloader-*_nosd.uf2`  
+Swap `BOARD=` for any board under `src/boards/` (e.g. `wiscore_rak4631_board`).
+
 ## Installation
 
 **IMPORTANT:** If you are running a MeshCore companion firmware or Ripple firmware on your device **you will need to run an erase after flashing a new bootloader**. Use the MeshCore web flasher to do the erase, it will guide you to the correct erase firmware for your device. Other erase firmwares will not work, they will not erase the ExtraFS area.
 
 The recommended way to install the bootloader is using the UF2 file.  
-Download the UF2 file for your board (they can be found in the releases with filenames beginning with `update-`), enter UF2 mode (usually by double pressing the reset button within 0.5s) and copy the UF2 file across.
+Download the UF2 file for your board (they can be found in the releases with filenames beginning with `update-`), enter UF2 mode (usually by double pressing the reset button within 0.5s) and copy the UF2 file across. Or build from source (Docker section above) and copy that UF2.
 
 If you have somehow managed to accidentally flash an incorrect bootloader to your device you will likely require flashing a full bootloader and SoftDevice zip package using ``adafruit-nrfutil``
 
