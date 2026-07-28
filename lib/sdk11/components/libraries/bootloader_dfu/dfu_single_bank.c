@@ -330,7 +330,47 @@ uint32_t dfu_start_pkt_handle(dfu_update_packet_t * p_packet)
         m_functions.activate = dfu_activate_app;
     }
 
-    if ( DFU_STATE_IDLE != m_dfu_state ) return NRF_ERROR_INVALID_STATE;
+    /* Summary: a START begins a fresh session, so accept one that arrives while a previous
+     * transfer is still parked mid-stream instead of refusing it.
+     *
+     * Detail
+     * ------
+     * A host can vanish mid-flash (cable pulled, client killed, BLE link lost) and nothing
+     * resets this state machine: the serial transport keeps waiting and
+     * dfu_transport_ble.c only restarts advertising. Refusing the next attempt with
+     * NRF_ERROR_INVALID_STATE was worse than useless, because neither transport can tell
+     * the host about it:
+     *
+     *   serial - the error is only APP_ERROR_CHECK()ed locally, so nothing goes back over
+     *            the wire. The host keeps streaming into a session that is ignoring it and
+     *            then reports success while bank_0 is still BANK_INVALID_APP and the device
+     *            has written nothing.
+     *   BLE    - answers INVALID_STATE, so the controller is told, but the device still
+     *            cannot be re-flashed until someone resets it.
+     *
+     * A START packet is by definition the beginning of a fresh session, so start over
+     * instead. Fixed here, in the shared bank handling, because both transports need it and
+     * neither can do it for the other. Mirrors dfu_init() except for pstorage_register(),
+     * which is still valid from the original init.
+     *
+     * DFU_STATE_PREPARING is left alone: an erase may be in flight (pstorage_clear on the
+     * OTA path) and resetting our bookkeeping underneath it would be worse than refusing.
+     */
+    if ( DFU_STATE_PREPARING == m_dfu_state ) return NRF_ERROR_INVALID_STATE;
+
+    if ( DFU_STATE_IDLE != m_dfu_state )
+    {
+        m_data_received      = 0;
+        m_init_packet_length = 0;
+        m_image_crc          = 0;
+
+        // Reset lazy erase state
+        dfu_page_erased      = NULL;
+        dfu_image_page_count = 0;
+        dfu_base_address     = 0;
+
+        m_dfu_state          = DFU_STATE_IDLE;
+    }
 
     m_functions.prepare(m_image_size);
 
