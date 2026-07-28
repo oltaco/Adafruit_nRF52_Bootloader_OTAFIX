@@ -86,6 +86,35 @@ static inline bool is_sd_existed(void)
 #define DATA_PACKET                     0x04                                                            /**< Packet identifies for a Data Packet. */
 #define STOP_DATA_PACKET                0x05                                                            /**< Packet identifies for the Data Stop Packet. */
 
+/* Local packet-type extensions live at 0xF0 and above.
+ *
+ * Detail: Nordic's legacy DFU defines 0x00..0x05 above, so keeping local additions high
+ * leaves the low range free should that ever be extended, and makes it obvious on the wire
+ * that a type is not part of the standard protocol. The type is carried in a full byte
+ * (p_rpc_cmd_buffer[0]) and only 0x00 is reserved (INVALID_PACKET), so any high value is
+ * available.
+ *
+ * Anything the bootloader does not recognise is dropped by the default case of
+ * process_dfu_packet(), so these are safe for a host to probe with: a bootloader that
+ * predates an extension simply ignores it and carries on.
+ */
+#define DFU_LOCAL_PACKET_BASE           0xF0                                                            /**< Start of the locally defined packet types. */
+
+/**@brief Local extension: ask the bootloader to reboot into a chosen DFU mode.
+ *
+ * Detail: the serial transport has no equivalent of the BLE transport's BLE_DFU_SYS_RESET,
+ * so a host had no way to say "start over" or "come back with mass storage" - the only
+ * routes were a physical double tap or destroying the application to force a recovery boot.
+ *
+ * Payload is one 32-bit word, the GPREGRET magic to boot with (see main.c):
+ *   0x57 UF2 (CDC + MSC)   0x4e serial only (CDC)   0xa8 BLE OTA   0x00 plain reset
+ *
+ * The payload must occupy a whole word: the transport derives its length as
+ * (total_len / 4) - 1 words, so a shorter payload rounds down to zero and the mode is
+ * ignored (the device then simply resets).
+ */
+#define DFU_REBOOT_PACKET               (DFU_LOCAL_PACKET_BASE + 0x06)                                  /**< 0xF6: reboot into the DFU mode given in the payload. */
+
 #define DFU_UPDATE_SD                   0x01                                                            /**< Bit field indicating update of SoftDevice is ongoing. */
 #define DFU_UPDATE_BL                   0x02                                                            /**< Bit field indicating update of bootloader is ongoing. */
 #define DFU_UPDATE_APP                  0x04                                                            /**< Bit field indicating update of application is ongoing. */
