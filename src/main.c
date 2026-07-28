@@ -107,9 +107,9 @@ extern void tusb_hal_nrf_power_event(uint32_t event);
  * since it is already in application. In all other case of OTA SD must be initialized
  */
 #define DFU_MAGIC_OTA_APPJUM            BOOTLOADER_DFU_START  // 0xB1
-#define DFU_MAGIC_OTA_RESET             0xA8
-#define DFU_MAGIC_SERIAL_ONLY_RESET     0x4e
-#define DFU_MAGIC_UF2_RESET             0x57
+#define DFU_MAGIC_OTA_RESET             BOOTLOADER_DFU_OTA_RESET_MAGIC     // 0xA8
+#define DFU_MAGIC_SERIAL_ONLY_RESET     BOOTLOADER_DFU_SERIAL_RESET_MAGIC  // 0x4e
+#define DFU_MAGIC_UF2_RESET             BOOTLOADER_DFU_UF2_RESET_MAGIC     // 0x57
 #define DFU_MAGIC_SKIP                  0x6d
 
 #define DFU_DBL_RESET_MAGIC             0x5A1AD5      // SALADS
@@ -119,6 +119,19 @@ extern void tusb_hal_nrf_power_event(uint32_t event);
 
 #define BOOTLOADER_VERSION_REGISTER     NRF_TIMER2->CC[0]
 #define DFU_SERIAL_STARTUP_INTERVAL     1000
+
+// How long we wait for a USB host to enumerate us before giving up on USB DFU.
+//
+// This replaces a literal 3000 in the bootloader_dfu_start() call below, so it is a change of
+// behaviour for the paths that already used it - single-tap reset, UF2 and serial-only - and not
+// only for the recovery added here. It is only observable when nothing enumerates at all, since
+// cancel_timeout_on_usb stops the timer as soon as the host answers: on battery, a device put into
+// DFU deliberately now takes 10 s rather than 3 s to give up and go back to the application.
+//
+// 3 s proved too tight to rely on. Measured on a ProMicro nRF52840, a host re-enumerating the
+// device after repeated resets is not always ready within 3 s, and recovery then flapped to BLE
+// with a perfectly good USB host attached - the exact failure this is meant to remove.
+#define DFU_USB_ENUM_TIMEOUT            10000
 
 // Allow for using reset button essentially to swap between application and bootloader.
 // This is controlled by a flag in the app and is the behavior of CPX and all Arcade boards when using MakeCode.
@@ -212,11 +225,27 @@ int main(void) {
     // clear in case we kept DFU_DBL_RESET_APP there
     (*dbl_reset_mem) = 0;
 
+    /* Drop any leftover DFU transport hint (see dfu_transport_hint_set() in bootloader.c)
+     * so a finished update boots the app on every subsequent reset rather than dropping
+     * back into DFU. Any magic the application asked for was already consumed and zeroed at
+     * the top of check_dfu_mode(), so a hint value still sitting here can only be ours. The
+     * SoftDevice is disabled above, so write GPREGRET directly. */
+    if (NRF_POWER->GPREGRET == DFU_MAGIC_OTA_RESET ||
+        NRF_POWER->GPREGRET == DFU_MAGIC_UF2_RESET ||
+        NRF_POWER->GPREGRET == DFU_MAGIC_SERIAL_ONLY_RESET) {
+      NRF_POWER->GPREGRET = 0;
+    }
+
     // start application
     bootloader_app_start();
   }
 
-  NRF_POWER->GPREGRET = 0xA8; // No application was loaded, reset the system with the OTA DFU update
+  // No valid application to jump to. Reboot into BLE OTA DFU so the device is always
+  // recoverable over *some* transport. This is also the BLE fallback for usb_recovery below:
+  // USB DFU was tried first but no host enumerated us in time. The magic is consumed at the
+  // top of check_dfu_mode(), ahead of the usb_recovery decision, so the reboot lands on BLE
+  // even with USB power still applied.
+  NRF_POWER->GPREGRET = DFU_MAGIC_OTA_RESET;
   NVIC_SystemReset();
 }
 
@@ -286,6 +315,47 @@ static void check_dfu_mode(void) {
     (*dbl_reset_mem) = 0;
   }
 
+  /*------------- Auto-recovery when there is no valid application -------------*/
+  /* Summary: when the only reason to enter DFU is a missing application, come up on USB DFU
+   * and let USB *enumeration* choose the transport - a host that answers keeps us on USB and
+   * re-flashable with no double-tap; if nobody answers we fall back to BLE OTA. Every
+   * explicit request (GPREGRET magics, double reset, DFU+FRESET) is handled above and still
+   * wins outright.
+   *
+   * Detail
+   * ------
+   * A failed serial/USB DFU leaves bank_0 = BANK_INVALID_APP (bootloader.c,
+   * DFU_BANK_0_ERASED). That used to fall straight through to BLE: ble_stack_init() ran,
+   * usb_init() never did, so the device vanished from USB entirely and only a physical
+   * double-tap brought it back. BLE OTA recovered automatically; serial/USB DFU did not.
+   *
+   * The two outcomes:
+   *
+   *   a host enumerates us within DFU_USB_ENUM_TIMEOUT -> stay in USB DFU, so the device is
+   *       immediately re-flashable over serial/UF2 with no double-tap.
+   *   nobody answers (battery, or a dumb charger that pulls VBUS high with no data host)
+   *       -> bootloader_dfu_start() returns on timeout and main() reboots into BLE OTA via
+   *       DFU_MAGIC_OTA_RESET.
+   *
+   * Enumeration is re-evaluated on every boot, including a cold one, so recovery survives
+   * power loss - unlike GPREGRET, which a power-on/brownout reset clears.
+   *
+   * Note on VBUS: gating this on NRF_POWER->USBREGSTATUS.VBUSDETECT first (to skip the wait
+   * when running on battery) does NOT work - measured on a ProMicro nRF52840, VBUSDETECT
+   * still reads 0 this early in boot and only asserts some tens of ms later, so an early
+   * read reports "battery" even with a host attached and would send us to BLE, which is
+   * exactly the behaviour being fixed. Enumeration already subsumes VBUS: no VBUS and
+   * charger-only both simply fail to enumerate. usb_init() copes with VBUS arriving late by
+   * design, registering a POWER USBDETECTED handler as well as sampling the status register.
+   */
+  bool usb_recovery = false;
+
+#ifdef NRF_USBD
+  // Parts without a USB peripheral (eg. nRF52832) keep the previous BLE-only behaviour.
+  if (!valid_app && !dfu_start && !_ota_dfu && !serial_only_dfu && !uf2_dfu && !double_reset) {
+    usb_recovery = true; // try USB DFU first, BLE on enumeration timeout
+  } else
+#endif
   if ((dfu_start || !valid_app) && !serial_only_dfu && !uf2_dfu && !double_reset) {
     _ota_dfu = true; // set default to OTA only when no explicit UF2/serial/dbl-reset
   }
@@ -298,6 +368,14 @@ static void check_dfu_mode(void) {
         screen_draw_ble();
       #endif
       led_state(STATE_BLE_DISCONNECTED);
+
+      /* Re-arm the transport hint. The magic that got us here was consumed above, so
+       * without this a second reset while advertising would fall back to probing USB first
+       * and silently move the device off BLE. There is no valid application to be trapped
+       * out of, and it is dropped again by a successful update or a power-on reset. Written
+       * before the SoftDevice is enabled, so a direct register write is fine. */
+      if (!valid_app) NRF_POWER->GPREGRET = DFU_MAGIC_OTA_RESET;
+
       if (!_sd_inited) mbr_init_sd();
       _sd_inited = true;
       ble_stack_init();
@@ -307,9 +385,12 @@ static void check_dfu_mode(void) {
     }
 
     // Initiate an update of the firmware.
-    if (APP_ASKS_FOR_SINGLE_TAP_RESET() || uf2_dfu || serial_only_dfu) {
-      // If USB is not enumerated in 3s (eg. because we're running on battery), we restart into app.
-      bootloader_dfu_start(_ota_dfu, 3000, true);
+    if (APP_ASKS_FOR_SINGLE_TAP_RESET() || uf2_dfu || serial_only_dfu || usb_recovery) {
+      // If USB is not enumerated within the timeout (eg. we are running on battery, or VBUS
+      // comes from a charger with no data host), this returns and we either restart into the
+      // app (valid app) or reboot into BLE OTA (usb_recovery: main() sets
+      // DFU_MAGIC_OTA_RESET and resets when the application is invalid).
+      bootloader_dfu_start(_ota_dfu, DFU_USB_ENUM_TIMEOUT, true);
     } else {
       // No timeout if bootloader requires user action (double-reset).
       bootloader_dfu_start(_ota_dfu, 0, false);

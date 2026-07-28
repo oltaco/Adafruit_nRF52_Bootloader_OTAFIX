@@ -27,6 +27,17 @@
 
 #define BOOTLOADER_DFU_START 0xB1
 
+/**@brief GPREGRET values that request a specific DFU transport on the next boot.
+ *
+ * Set by the application to enter DFU deliberately, and also written by the bootloader
+ * itself to remember which transport an in-progress update was using, so that an
+ * interrupted update resumes on the same one. See bootloader_dfu_update_process() and
+ * check_dfu_mode() in main.c.
+ */
+#define BOOTLOADER_DFU_OTA_RESET_MAGIC    0xA8
+#define BOOTLOADER_DFU_SERIAL_RESET_MAGIC 0x4e
+#define BOOTLOADER_DFU_UF2_RESET_MAGIC    0x57
+
 #define BOOTLOADER_SVC_APP_DATA_PTR_GET 0x02
 
 /**@brief DFU Bank state code, which indicates wether the bank contains: A valid image, invalid image, or an erased flash.
