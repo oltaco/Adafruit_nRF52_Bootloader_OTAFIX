@@ -118,11 +118,18 @@ static void dfu_prepare_func_app_erase(uint32_t image_size)
     {
         uint32_t const page_count = NRFX_CEIL_DIV(m_image_size, CODE_PAGE_SIZE);
 
+        /* Erasing the whole region takes ~90 ms per page - about 10 s for a 460 KB image -
+         * and blocks here without any DFU packet arriving. Report each page as activity so
+         * the stall supervision in bootloader.c does not mistake a healthy erase for a dead
+         * transfer and reboot in the middle of a normal flash. */
+        extern volatile bool dfu_startup_packet_received;
+
         for ( uint32_t i = 0; i < page_count; i++ )
         {
             uint32_t const addr = DFU_BANK_0_REGION_START + i * CODE_PAGE_SIZE;
             PRINTF("Erase 0x%08lX\r\n", addr);
             nrfx_nvmc_page_erase(addr);
+            dfu_startup_packet_received = true;
         }
 
         // invoke complete callback
