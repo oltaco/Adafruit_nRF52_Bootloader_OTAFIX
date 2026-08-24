@@ -112,9 +112,18 @@ extern void tusb_hal_nrf_power_event(uint32_t event);
 #define DFU_MAGIC_UF2_RESET             0x57
 #define DFU_MAGIC_SKIP                  0x6d
 
+/* Reset-tap state, held in the 4-byte no-init DBL_RESET region (see linker script).
+ * It survives a pin reset, so it records how many taps we have seen so far:
+ * - DFU_DBL_RESET_MAGIC : 1 tap  seen, waiting to see whether a 2nd arrives
+ * - DFU_TPL_RESET_MAGIC : 2 taps seen, waiting to see whether a 3rd arrives
+ * Two taps enter USB DFU, three taps enter BLE OTA DFU. The 3rd-tap window only
+ * exists on boards that set TRIPLE_TAP_BLE_DFU; elsewhere 2 taps enter USB DFU at once.
+ */
 #define DFU_DBL_RESET_MAGIC             0x5A1AD5      // SALADS
+#define DFU_TPL_RESET_MAGIC             0x5A1AD6      // SALADS+1
 #define DFU_DBL_RESET_APP               0x4ee5677e
 #define DFU_DBL_RESET_DELAY             500
+#define DFU_TPL_RESET_DELAY             500
 #define DFU_DBL_RESET_MEM               0x20007F7C
 
 #define BOOTLOADER_VERSION_REGISTER     NRF_TIMER2->CC[0]
@@ -237,9 +246,15 @@ static void check_dfu_mode(void) {
   bool const reason_reset_pin = (NRF_POWER->RESETREAS & POWER_RESETREAS_RESETPIN_Msk) ? true : false;
   bool const double_reset = ((*dbl_reset_mem) == DFU_DBL_RESET_MAGIC) && reason_reset_pin;
 
+  // Third tap of a triple tap: two taps were already seen and armed DFU_TPL_RESET_MAGIC below.
+  // Constant false unless the board opts in, so every branch on it folds away.
+  bool const triple_reset = TRIPLE_TAP_BLE_DFU &&
+                            ((*dbl_reset_mem) == DFU_TPL_RESET_MAGIC) && reason_reset_pin;
+
   // start either serial, uf2 or ble
   bool dfu_start = _ota_dfu || serial_only_dfu || uf2_dfu ||
-                   (((*dbl_reset_mem) == DFU_DBL_RESET_MAGIC) && reason_reset_pin);
+                   (((*dbl_reset_mem) == DFU_DBL_RESET_MAGIC) && reason_reset_pin) ||
+                   triple_reset;
 
   // Clear GPREGRET if it is our values
   if (dfu_start || dfu_skip) NRF_POWER->GPREGRET = 0;
@@ -279,6 +294,23 @@ static void check_dfu_mode(void) {
     }
 #endif
   }
+#if TRIPLE_TAP_BLE_DFU
+  else if (double_reset && !_ota_dfu && !serial_only_dfu && !uf2_dfu) {
+    // Second tap. USB DFU is where this ends up, but hold it off for one more window so a
+    // third tap can pick BLE OTA instead. Fast LED blink signals that the window is open.
+    led_state(STATE_DFU_MODE_SELECT);
+
+    // Register the second reset for triple reset detection
+    (*dbl_reset_mem) = DFU_TPL_RESET_MAGIC;
+
+    // if RST is pressed during this delay (triple reset) --> it will enter BLE OTA DFU
+    NRFX_DELAY_MS(DFU_TPL_RESET_DELAY);
+
+    // Window closed, no third tap. Restore the normal indication so that USB DFU below
+    // starts from exactly the LED state it would have had without the extra window.
+    led_state(STATE_BOOTLOADER_STARTED);
+  }
+#endif
 
   if (APP_ASKS_FOR_SINGLE_TAP_RESET()) {
     (*dbl_reset_mem) = DFU_DBL_RESET_APP;
@@ -289,6 +321,9 @@ static void check_dfu_mode(void) {
   if ((dfu_start || !valid_app) && !serial_only_dfu && !uf2_dfu && !double_reset) {
     _ota_dfu = true; // set default to OTA only when no explicit UF2/serial/dbl-reset
   }
+
+  // Triple tap always means BLE OTA, whatever the defaults above settled on
+  if (triple_reset) _ota_dfu = true;
 
   // Enter DFU mode accordingly to input
   if (dfu_start || !valid_app) {

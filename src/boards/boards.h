@@ -45,6 +45,18 @@
 #define BUTTON_FRESET   BUTTON_2
 #endif
 
+// Triple tap on the reset button enters BLE OTA DFU; double tap still enters USB DFU.
+// A board can opt out by defining this as 0 in its board.h.
+// Not available on nrf52832: its SRAM is cleared by a GPIO reset, so the tap state cannot
+// survive, which is the same reason double tap detection is skipped there.
+#ifndef TRIPLE_TAP_BLE_DFU
+  #ifdef NRF52832_XXAA
+    #define TRIPLE_TAP_BLE_DFU 0
+  #else
+    #define TRIPLE_TAP_BLE_DFU 1
+  #endif
+#endif
+
 // The primary LED is usually Red but not in all cases.
 #define LED_PRIMARY 0
 // The secondary LED, when available, is usually blue.
@@ -91,7 +103,8 @@ enum {
   STATE_WRITING_STARTED,
   STATE_WRITING_FINISHED,
   STATE_BLE_CONNECTED,
-  STATE_BLE_DISCONNECTED
+  STATE_BLE_DISCONNECTED,
+  STATE_DFU_MODE_SELECT
 };
 
 void led_pwm_init(uint32_t led_index, uint32_t led_pin);

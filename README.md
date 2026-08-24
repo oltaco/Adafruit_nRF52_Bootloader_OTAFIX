@@ -91,12 +91,41 @@ When in OTA DFU mode, devices advertise using a board-specific name rather than 
 
 ---
 
+## Entering DFU mode
+
+The reset button chooses the DFU transport:
+
+| Reset taps | Result |
+| --- | --- |
+| 1 | Normal boot into the application |
+| 2 | USB DFU — UF2 drive + CDC serial |
+| 3 | BLE OTA DFU |
+
+Each tap has to land within 0.5s of the one before it, the same window the double tap
+already used. After the second tap the status LED blinks three times faster for 0.5s:
+that is the window in which a third tap picks BLE OTA. Let it expire and the device
+drops into USB DFU as it always did, just 0.5s later.
+
+This matters most on boards with no DFU or FRESET button wired, such as the RAK 4631
+and RAK 3401, where BLE OTA DFU could otherwise only be entered from the application
+(buttonless DFU service / `GPREGRET`) or by having no valid application at all. A device
+running firmware that exposes no DFU service had no way in.
+
+A board can opt out by defining `TRIPLE_TAP_BLE_DFU` as `0` in its `board.h`, which
+restores the previous behaviour of a double tap entering USB DFU immediately. It is
+always off on nrf52832, where a GPIO reset clears SRAM and the tap state cannot
+survive.
+
+---
+
 ## Installation
 
 **IMPORTANT:** If you are running a MeshCore companion firmware or Ripple firmware on your device **you will need to run an erase after flashing a new bootloader**. Use the MeshCore web flasher to do the erase, it will guide you to the correct erase firmware for your device. Other erase firmwares will not work, they will not erase the ExtraFS area.
 
 The recommended way to install the bootloader is using the UF2 file.  
 Download the UF2 file for your board (they can be found in the releases with filenames beginning with `update-`), enter UF2 mode (usually by double pressing the reset button within 0.5s) and copy the UF2 file across.
+
+A double tap still gives you the UF2 drive; it just waits an extra 0.5s first, in case you meant to triple tap into BLE OTA DFU. See [Entering DFU mode](#entering-dfu-mode).
 
 If you have somehow managed to accidentally flash an incorrect bootloader to your device you will likely require flashing a full bootloader and SoftDevice zip package using ``adafruit-nrfutil``
 
@@ -117,6 +146,9 @@ In this mode:
 **What to do:**
 - Perform an OTA update using a supported DFU app, **or**
 - Explicitly request UF2/serial mode using **double-reset**.
+
+The reverse also works: **triple-reset** puts a device that boots normally into BLE OTA
+DFU, without needing the application to cooperate.
 
 This behaviour is intentional and prevents devices from getting stuck in UF2 mode after failed OTA updates.
 

@@ -436,6 +436,16 @@ void led_state(uint32_t state) {
       #endif
       break;
 
+#if TRIPLE_TAP_BLE_DFU
+    // Waiting to see whether a third tap arrives (see TRIPLE_TAP_BLE_DFU).
+    // Blinks 3x faster than any other state, so the open window is unmistakable.
+    // Only the primary cycle is touched, so whichever mode we end up in still sets
+    // up its own indication from an unchanged starting point.
+    case STATE_DFU_MODE_SELECT:
+      primary_cycle_length = 100;
+      break;
+#endif
+
     default:
       break;
   }
