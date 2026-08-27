@@ -52,7 +52,8 @@
 - Heltec T096
 - Heltec T1
 - Heltec T114 / HT-nRF5262
-- LilyGO T-Echo
+- LilyGo T-Echo
+- LilyGo T-Echo Lite
 - Minewsemi MX25LE01
 - Nologo ProMicro NRF52840 (aka SuperMini NRF52840)
 - RAK 4631
@@ -78,6 +79,7 @@ When in OTA DFU mode, devices advertise using a board-specific name rather than 
 | Heltec T1                    | `T1_DFU`                 |
 | Heltec T114                  | `T114_DFU`               |
 | LILYGO T-Echo                | `LGTE_DFU`               |
+| LILYGO T-Echo Lite           | `LTEL_DFU`               |
 | Minewsemi MX25LE01           | `MX25_DFU`               |
 | ProMicro NRF52840            | `PROM_DFU`               |
 | RAK 4631                     | `4631_DFU`               |
