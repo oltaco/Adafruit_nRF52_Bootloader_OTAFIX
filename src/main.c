@@ -248,6 +248,14 @@ static void check_dfu_mode(void) {
   if (dfu_skip) return;
 
   /*------------- Determine DFU mode (Serial, OTA, FRESET or normal) -------------*/
+  // Allow boards wait for button release so that wake presses don't enter DFU
+  #ifdef BUTTON_DFU_DELAY_MS
+  for (uint16_t waited = 0; waited < BUTTON_DFU_DELAY_MS; waited += 10) {
+    if (!button_pressed(BUTTON_DFU) && !button_pressed(BUTTON_FRESET)) break;
+    NRFX_DELAY_MS(10);
+  }
+  #endif
+
   // DFU button pressed
   dfu_start = dfu_start || button_pressed(BUTTON_DFU);
 
