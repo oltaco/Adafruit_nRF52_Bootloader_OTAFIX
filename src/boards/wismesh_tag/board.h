@@ -45,6 +45,7 @@
 #define BUTTON_1              _PINNUM(0, 9)	// Allow booting to OTA DFU from button
 #define BUTTON_2              _PINNUM(0, 9)	// Allow booting to OTA DFU from button
 #define BUTTON_PULL           NRF_GPIO_PIN_PULLUP
+#define BUTTON_DFU_DELAY_MS   500
 
 //--------------------------------------------------------------------+
 // BLE OTA
