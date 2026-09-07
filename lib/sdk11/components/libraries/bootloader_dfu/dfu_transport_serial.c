@@ -230,6 +230,21 @@ static void process_dfu_packet(void * p_event_data, uint16_t event_size)
                         led_state(STATE_WRITING_STARTED);
                         break;
 
+                    case DFU_REBOOT_PACKET:
+                        /* Host asked us to come back in a particular DFU mode. Gives the
+                         * serial transport what BLE already has in BLE_DFU_SYS_RESET, and
+                         * lets a host reach UF2 mode (mass storage) without a physical
+                         * double tap and without erasing the application to force a
+                         * recovery boot. The payload word is the GPREGRET magic to use; an
+                         * empty payload just resets. */
+                        {
+                            uint8_t const * p_mode = (uint8_t const *) packet->params.data_packet.p_data_packet;
+
+                            NRF_POWER->GPREGRET = (packet->params.data_packet.packet_length > 0) ? p_mode[0] : 0;
+                            NVIC_SystemReset();
+                        }
+                        return;
+
                     case STOP_DATA_PACKET:
                         (void)dfu_image_validate();
                         (void)dfu_image_activate();
