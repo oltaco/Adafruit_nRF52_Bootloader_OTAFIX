@@ -272,6 +272,27 @@ static void rx_vendor_specific_pkt_type_handle(const uint8_t * p_buffer, uint32_
     {
         // RX packet is valid: validate sequence number.
         const uint8_t rx_seq_number = packet_seq_nmbr_extract(p_buffer);
+
+        /* Summary: resynchronise when the peer restarts a session, otherwise its first
+         * packets are acknowledged and then thrown away.
+         *
+         * Detail: m_packet_expected_seq_number is only initialised in hci_transport_open(),
+         * which runs once per boot, so an interrupted transfer leaves it mid-stream. The
+         * next session starts numbering again at INITIAL_ACK_NUMBER_EXPECTED and therefore
+         * mismatches - and the mismatch path below acknowledges the packet before discarding
+         * it, so the peer believes it was delivered. For DFU that is silently destructive:
+         * the START packet is thrown away, the whole image is then streamed into a state
+         * machine that never started, nothing is written, and the host still reports success.
+         *
+         * A jump back to the initial number can only mean a new session: in normal operation
+         * the peer sends either the expected number or a retransmission of the previous one,
+         * because it advances only on our acknowledgement. */
+        if ((rx_seq_number == INITIAL_ACK_NUMBER_EXPECTED) &&
+            (packet_number_expected_get() != INITIAL_ACK_NUMBER_EXPECTED))
+        {
+            m_packet_expected_seq_number = INITIAL_ACK_NUMBER_EXPECTED;
+        }
+
         if (packet_number_expected_get() == rx_seq_number)
         {
             // Sequence number is valid: transmit acknowledgement.
