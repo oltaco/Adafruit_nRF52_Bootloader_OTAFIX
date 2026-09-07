@@ -54,6 +54,39 @@ static bool m_cancel_timeout_on_usb; /**< If set the timeout is cancelled when U
 APP_TIMER_DEF( _dfu_startup_timer );
 volatile bool dfu_startup_packet_received = false;
 
+/* Summary: one tick drives two independent timeouts - "did a USB host turn up at all?"
+ * (enumeration, as before) and "did a transfer that had started go silent?" (stall, new).
+ * On a stall we reboot, so a transfer abandoned mid-flight no longer leaves the bootloader
+ * waiting forever for the rest of an image that will never arrive, with the application
+ * already erased and nothing to fall back to.
+ *
+ * Detail
+ * ------
+ * Enumeration expires after the timeout_ms passed to bootloader_dfu_start() and leaves DFU,
+ * so the caller boots the app or falls back to BLE; stall calls NVIC_SystemReset(). They are
+ * counted separately because the enumeration window wants to be generous while stall
+ * detection wants to be short, and one shared interval cannot be both.
+ *
+ * dfu_startup_packet_received is the activity flag: process_dfu_packet() sets it on every
+ * DFU packet, and the serial erase loop sets it per page, because erasing a large
+ * application takes ~90 ms per page with no packets at all - about 10 s for a 460 KB image
+ * and ~17 s for a 768 KB one - which would otherwise look exactly like a stall.
+ *
+ * The stall check measures *elapsed time* rather than counting handler invocations. That
+ * distinction matters: a long blocking erase stops app_timer from running, and it then
+ * catches up by calling this handler many times in immediate succession. Counting
+ * invocations, only the first of that burst sees the activity flag and the rest run the
+ * counter straight past the threshold - which rebooted the device at the exact moment a
+ * 17 s erase finished, killing a perfectly healthy flash of a large image.
+ */
+#define DFU_TICK_MS       1000                 /**< Supervision tick. */
+#define DFU_STALL_MS      15000                /**< Silence before a live transfer is declared dead. */
+
+static uint16_t m_dfu_enum_deadline_ticks;     /**< Enumeration deadline, in ticks. */
+static uint16_t m_dfu_wait_ticks;              /**< Ticks elapsed while not enumerated. */
+static uint32_t m_dfu_last_activity;           /**< app_timer count at the last sign of activity. */
+static bool     m_dfu_transfer_started;        /**< Set once the host has actually sent something. */
+
 /**@brief   Function for handling callbacks from pstorage module.
  *
  * @details Handles pstorage results for clear and storage operation. For detailed description of
@@ -83,9 +116,27 @@ static void dfu_startup_timer_handler(void * p_context)
 #ifdef NRF_USBD
   if (m_cancel_timeout_on_usb && tud_mounted())
   {
+    // Enumerated, so the enumeration deadline no longer applies: supervise progress.
+    uint32_t const now = app_timer_cnt_get();
+
+    if (dfu_startup_packet_received)
+    {
+      dfu_startup_packet_received = false;   // activity since we last looked
+      m_dfu_transfer_started      = true;
+      m_dfu_last_activity         = now;
+    }
+    else if (m_dfu_transfer_started &&
+             (app_timer_cnt_diff_compute(now, m_dfu_last_activity) >= APP_TIMER_TICKS(DFU_STALL_MS)))
+    {
+      // A transfer began and then went silent: the host is gone. Start over clean.
+      NVIC_SystemReset();
+    }
     return;
   }
 #endif
+
+  // Not enumerated yet: hold off until the enumeration deadline.
+  if (++m_dfu_wait_ticks < m_dfu_enum_deadline_ticks) return;
 
   // nRF52832 forced DFU on startup
   // No packets are received within timeout, exit DFU mode
@@ -341,9 +392,17 @@ uint32_t bootloader_dfu_start(bool ota, uint32_t timeout_ms, bool cancel_timeout
     if ( timeout_ms )
     {
       dfu_startup_packet_received = false;
+      m_dfu_wait_ticks            = 0;
+      m_dfu_last_activity         = app_timer_cnt_get();
+      m_dfu_transfer_started      = false;
 
-      app_timer_create(&_dfu_startup_timer, APP_TIMER_MODE_SINGLE_SHOT, dfu_startup_timer_handler);
-      app_timer_start(_dfu_startup_timer, APP_TIMER_TICKS(timeout_ms), NULL);
+      m_dfu_enum_deadline_ticks = (timeout_ms + DFU_TICK_MS - 1) / DFU_TICK_MS;
+      if ( m_dfu_enum_deadline_ticks == 0 ) m_dfu_enum_deadline_ticks = 1;
+
+      // Repeated, not single shot: after the enumeration decision the same tick keeps
+      // supervising an established transfer (see dfu_startup_timer_handler).
+      app_timer_create(&_dfu_startup_timer, APP_TIMER_MODE_REPEATED, dfu_startup_timer_handler);
+      app_timer_start(_dfu_startup_timer, APP_TIMER_TICKS(DFU_TICK_MS), NULL);
     }
 
     err_code = dfu_transport_serial_update_start();
