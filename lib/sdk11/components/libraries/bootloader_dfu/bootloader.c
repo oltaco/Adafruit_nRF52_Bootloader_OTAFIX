@@ -20,6 +20,7 @@
 #include "nrf.h"
 #include "app_error.h"
 #include "nrf_sdm.h"
+#include "nrf_soc.h"   // sd_power_gpregret_set/clr (transport hint while SD is on)
 #include "nrf_mbr.h"
 #include "nordic_common.h"
 #include "crc16.h"
@@ -182,6 +183,53 @@ bool bootloader_app_is_valid(void)
 }
 
 
+/**@brief Remember which transport the update currently in progress is using.
+ *
+ * Summary: record it in GPREGRET at the moment bank 0 is erased, so recovery resumes on the
+ * same transport - a BLE OTA that died mid-flash comes back on BLE even with USB attached,
+ * instead of silently switching.
+ *
+ * Detail: once an update has erased bank 0 the application is gone, so a reset before the
+ * transfer finishes leaves the bootloader choosing a recovery transport from scratch.
+ *
+ * GPREGRET survives soft, pin and watchdog resets but is cleared by a power-on or brownout
+ * reset, which is exactly the scope wanted: after a power loss there is nothing to resume,
+ * and check_dfu_mode() falls back to trying USB first and dropping to BLE if no host
+ * enumerates.
+ *
+ * @param[in] ota  true while a BLE OTA is running. It also tells us the SoftDevice is
+ *                 enabled, so GPREGRET has to be written through the SD API rather than by
+ *                 touching the POWER registers directly.
+ */
+static void dfu_transport_hint_set(bool ota)
+{
+  if ( ota )
+  {
+    (void) sd_power_gpregret_clr(0, 0xFFUL);
+    (void) sd_power_gpregret_set(0, BOOTLOADER_DFU_OTA_RESET_MAGIC);
+  }
+  else
+  {
+    NRF_POWER->GPREGRET = BOOTLOADER_DFU_UF2_RESET_MAGIC;
+  }
+}
+
+/**@brief Drop the transport hint once the update has completed successfully, so the next
+ *        boot runs the new application instead of re-entering DFU.
+ */
+static void dfu_transport_hint_clear(bool ota)
+{
+  if ( ota )
+  {
+    (void) sd_power_gpregret_clr(0, 0xFFUL);
+  }
+  else
+  {
+    NRF_POWER->GPREGRET = 0;
+  }
+}
+
+
 static void bootloader_settings_save(bootloader_settings_t * p_settings)
 {
   if ( is_ota() )
@@ -218,6 +266,9 @@ void bootloader_dfu_update_process(dfu_update_status_t update_status)
 
     m_update_status      = BOOTLOADER_SETTINGS_SAVING;
     bootloader_settings_save(&settings);
+
+    // Transfer finished, there is nothing left to resume.
+    dfu_transport_hint_clear(is_ota());
   }
   else if (update_status.status_code == DFU_UPDATE_SD_COMPLETE)
   {
@@ -293,6 +344,10 @@ void bootloader_dfu_update_process(dfu_update_status_t update_status)
     settings.bank_1      = p_bootloader_settings->bank_1;
 
     bootloader_settings_save(&settings);
+
+    // The application is now invalid: remember the transport so an interrupted transfer
+    // resumes on the same one instead of being re-routed on the next boot.
+    dfu_transport_hint_set(is_ota());
   }
   else if (update_status.status_code == DFU_RESET)
   {
