@@ -48,8 +48,23 @@
   static uint16_t            m_peer_data_crc __attribute__((section("NoInit"), zero_init));        /**< CRC variable to ensure the integrity of the peer data provided. */
 
 #elif defined ( __GNUC__ )
-  __attribute__((section(".noinit"))) static dfu_ble_peer_data_t m_peer_data;                      /**< This variable should be placed in a non initialized RAM section in order to be valid upon soft reset from application into bootloader. */
-  __attribute__((section(".noinit"))) static uint16_t            m_peer_data_crc;                  /**< CRC variable to ensure the integrity of the peer data provided. */
+  /* The application (Bluefruit BLEDfu) writes the peer data at the start of NOINIT (0x20007F80)
+   * with its CRC16 immediately after it (offset 60). Two separate .noinit variables leave the order
+   * up to the compiler: GCC emitted the CRC first, so the bootloader read the peer data 2 bytes
+   * off, the CRC never matched, and OTA always fell back to address+1 (the DFU app then lost the
+   * device on the first attempt). Keep data and CRC in one struct so the layout is fixed. */
+  typedef struct
+  {
+      dfu_ble_peer_data_t data;
+      uint16_t            crc;
+  } dfu_ble_peer_shared_t;
+
+  _Static_assert(sizeof(dfu_ble_peer_data_t) == 60, "peer data must match Bluefruit BLEDfu layout");
+  _Static_assert(__builtin_offsetof(dfu_ble_peer_shared_t, crc) == 60, "CRC must follow peer data at offset 60");
+
+  __attribute__((section(".noinit"))) static dfu_ble_peer_shared_t m_peer_shared;                  /**< Non initialized RAM, valid upon soft reset from application into bootloader. */
+  #define m_peer_data      (m_peer_shared.data)
+  #define m_peer_data_crc  (m_peer_shared.crc)
 
 #elif defined ( __ICCARM__ )
   __no_init static dfu_ble_peer_data_t m_peer_data     @ 0x20003F80;                               /**< This variable should be placed in a non initialized RAM section in order to be valid upon soft reset from application into bootloader. */
